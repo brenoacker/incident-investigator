@@ -18,6 +18,7 @@ class NotificationStatus(StrEnum):
 
 class NotificationDeliveryResult(StrEnum):
     ACCEPTED = "accepted"
+    RATE_LIMITED = "rate_limited"
 
 
 class NotificationRequestCreate(BaseModel):
@@ -57,6 +58,7 @@ class NotificationRequestRepository(Protocol):
 
 class NotificationDelivery(BaseModel):
     result: NotificationDeliveryResult
+    status_code: int = 202
 
 
 class NotificationProvider(Protocol):
