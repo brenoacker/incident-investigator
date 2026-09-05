@@ -27,6 +27,9 @@ class RedisNotificationQueue(NotificationQueue):
             return None
         return NotificationMessage.model_validate_json(payload)
 
+    def depth(self) -> int:
+        return cast(int, self.client.llen(self.queue_name))
+
 
 def redis_url() -> str:
     return os.environ.get("REDIS_URL", "redis://redis:6379/0")
