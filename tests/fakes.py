@@ -5,8 +5,10 @@ from datetime import datetime, timezone
 
 from incident_investigation_harness.notifications import (
     NotificationMessage,
+    NotificationDeliveryResult,
     NotificationRequest,
     NotificationRequestCreate,
+    NotificationStatus,
 )
 from incident_investigation_harness.tickets import Ticket, TicketCreate
 
@@ -40,7 +42,7 @@ class InMemoryNotificationRequestRepository:
             id=uuid.uuid4(),
             ticket_id=request.ticket_id,
             recipient_email=request.recipient_email,
-            status="pending",
+            status=NotificationStatus.PENDING,
             created_at=datetime.now(timezone.utc),
         )
         self.requests[created.id] = created
@@ -48,6 +50,22 @@ class InMemoryNotificationRequestRepository:
 
     def get(self, request_id: uuid.UUID) -> NotificationRequest | None:
         return self.requests.get(request_id)
+
+    def mark_delivered(
+        self,
+        request_id: uuid.UUID,
+        result: NotificationDeliveryResult,
+        delivered_at: datetime,
+    ) -> NotificationRequest:
+        request = self.requests[request_id].model_copy(
+            update={
+                "status": NotificationStatus.DELIVERED,
+                "delivery_result": result,
+                "delivered_at": delivered_at,
+            }
+        )
+        self.requests[request_id] = request
+        return request
 
 
 class InMemoryNotificationQueue:

@@ -2,15 +2,32 @@ from __future__ import annotations
 
 import os
 import uuid
+from typing import Any
 from datetime import datetime, timezone
 
 import psycopg
 
 from incident_investigation_harness.notifications import (
+    NotificationDeliveryResult,
     NotificationRequest,
     NotificationRequestCreate,
+    NotificationStatus,
 )
 from incident_investigation_harness.tickets import Ticket, TicketCreate
+
+
+def _notification_request_from_row(row: tuple[Any, ...]) -> NotificationRequest:
+    return NotificationRequest(
+        id=row[0],
+        ticket_id=row[1],
+        recipient_email=row[2],
+        status=NotificationStatus(row[3]),
+        created_at=row[4],
+        delivery_result=(
+            NotificationDeliveryResult(row[5]) if row[5] is not None else None
+        ),
+        delivered_at=row[6],
+    )
 
 
 class PostgresTicketRepository:
@@ -98,8 +115,17 @@ class PostgresNotificationRequestRepository:
                     ticket_id UUID NOT NULL REFERENCES tickets(id),
                     recipient_email VARCHAR(320) NOT NULL,
                     status VARCHAR(32) NOT NULL,
-                    created_at TIMESTAMPTZ NOT NULL
+                    created_at TIMESTAMPTZ NOT NULL,
+                    delivery_result VARCHAR(64),
+                    delivered_at TIMESTAMPTZ
                 )
+                """
+            )
+            connection.execute(
+                """
+                ALTER TABLE notification_requests
+                ADD COLUMN IF NOT EXISTS delivery_result VARCHAR(64),
+                ADD COLUMN IF NOT EXISTS delivered_at TIMESTAMPTZ
                 """
             )
 
@@ -108,7 +134,7 @@ class PostgresNotificationRequestRepository:
             id=uuid.uuid4(),
             ticket_id=request.ticket_id,
             recipient_email=request.recipient_email,
-            status="pending",
+            status=NotificationStatus.PENDING,
             created_at=datetime.now(timezone.utc),
         )
         with psycopg.connect(self.database_url) as connection:
@@ -132,7 +158,8 @@ class PostgresNotificationRequestRepository:
         with psycopg.connect(self.database_url) as connection:
             row = connection.execute(
                 """
-                SELECT id, ticket_id, recipient_email, status, created_at
+                SELECT id, ticket_id, recipient_email, status, created_at,
+                       delivery_result, delivered_at
                 FROM notification_requests
                 WHERE id = %s
                 """,
@@ -140,13 +167,28 @@ class PostgresNotificationRequestRepository:
             ).fetchone()
         if row is None:
             return None
-        return NotificationRequest(
-            id=row[0],
-            ticket_id=row[1],
-            recipient_email=row[2],
-            status=row[3],
-            created_at=row[4],
-        )
+        return _notification_request_from_row(row)
+
+    def mark_delivered(
+        self,
+        request_id: uuid.UUID,
+        result: NotificationDeliveryResult,
+        delivered_at: datetime,
+    ) -> NotificationRequest:
+        with psycopg.connect(self.database_url) as connection:
+            row = connection.execute(
+                """
+                UPDATE notification_requests
+                SET status = %s, delivery_result = %s, delivered_at = %s
+                WHERE id = %s
+                RETURNING id, ticket_id, recipient_email, status, created_at,
+                          delivery_result, delivered_at
+                """,
+                (NotificationStatus.DELIVERED, result, delivered_at, request_id),
+            ).fetchone()
+        if row is None:
+            raise ValueError(f"notification request {request_id} not found")
+        return _notification_request_from_row(row)
 
 
 def database_url() -> str:
