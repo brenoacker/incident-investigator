@@ -6,6 +6,8 @@ from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
+from incident_investigation_harness.context import InvestigationContext
+
 
 class TicketCreate(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
@@ -13,6 +15,7 @@ class TicketCreate(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     description: str = Field(min_length=1, max_length=20_000)
     requester_email: EmailStr
+    investigation_context: InvestigationContext
 
 
 class Ticket(BaseModel):
@@ -24,12 +27,17 @@ class Ticket(BaseModel):
     requester_email: EmailStr
     status: str
     created_at: datetime
+    investigation_context: InvestigationContext
 
 
 class TicketRepository(Protocol):
     def create(self, ticket: TicketCreate) -> Ticket: ...
 
     def get(self, ticket_id: uuid.UUID) -> Ticket | None: ...
+
+    def list_by_investigation_run_id(
+        self, investigation_run_id: uuid.UUID
+    ) -> list[Ticket]: ...
 
 
 class TicketNotFound(Exception):

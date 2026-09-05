@@ -27,12 +27,22 @@ class InMemoryNotificationRequestRepository(NotificationRequestRepository):
             recipient_email=request.recipient_email,
             status=NotificationStatus.PENDING,
             created_at=datetime.now().astimezone(),
+            investigation_context=request.investigation_context,
         )
         self.requests[created.id] = created
         return created
 
     def get(self, request_id: uuid.UUID) -> NotificationRequest | None:
         return self.requests.get(request_id)
+
+    def list_by_investigation_run_id(
+        self, investigation_run_id: uuid.UUID
+    ) -> list[NotificationRequest]:
+        return [
+            request
+            for request in self.requests.values()
+            if request.investigation_context.investigation_run_id == investigation_run_id
+        ]
 
     def mark_delivered(
         self,

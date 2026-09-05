@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from incident_investigation_harness.api.dependencies import get_ticket_repository
 from incident_investigation_harness.tickets import (
@@ -21,6 +21,14 @@ def post_ticket(
     repository: TicketRepository = Depends(get_ticket_repository),
 ) -> Ticket:
     return create_ticket(repository, ticket)
+
+
+@router.get("", status_code=200, response_model=list[Ticket])
+def list_tickets(
+    investigation_run_id: UUID = Query(...),
+    repository: TicketRepository = Depends(get_ticket_repository),
+) -> list[Ticket]:
+    return repository.list_by_investigation_run_id(investigation_run_id)
 
 
 @router.get("/{ticket_id}", status_code=200, response_model=Ticket)

@@ -21,6 +21,7 @@ from incident_investigation_harness.notifications import (
     NotificationRequestCreate,
     NotificationWorker,
 )
+from incident_investigation_harness.context import InvestigationContext
 
 
 class ScenarioName(StrEnum):
@@ -135,11 +136,17 @@ class _Scenario:
                             f"{self.name}-{self.execution_number}-{request_index}",
                         ),
                         recipient_email="oncall@example.com",
+                        investigation_context=InvestigationContext(
+                            incident_id=uuid.uuid5(uuid.NAMESPACE_DNS, f"incident-{self.name}"),
+                            investigation_run_id=uuid.uuid5(uuid.NAMESPACE_DNS, f"run-{self.name}-{self.execution_number}"),
+                        ),
                     )
                 )
                 queue.publish(
                     NotificationMessage(
-                        request_id=request.id, ticket_id=request.ticket_id
+                        request_id=request.id,
+                        ticket_id=request.ticket_id,
+                        investigation_context=request.investigation_context,
                     )
                 )
             peak_backlog = max(peak_backlog, queue.depth())

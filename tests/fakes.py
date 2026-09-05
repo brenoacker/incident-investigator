@@ -22,9 +22,17 @@ class InMemoryTicketRepository:
             requester_email=ticket.requester_email,
             status="open",
             created_at=datetime.now(timezone.utc),
+            investigation_context=ticket.investigation_context,
         )
         self.tickets[created.id] = created
         return created
 
     def get(self, ticket_id: uuid.UUID) -> Ticket | None:
         return self.tickets.get(ticket_id)
+
+    def list_by_investigation_run_id(self, investigation_run_id: uuid.UUID) -> list[Ticket]:
+        return [
+            ticket
+            for ticket in self.tickets.values()
+            if ticket.investigation_context.investigation_run_id == investigation_run_id
+        ]
