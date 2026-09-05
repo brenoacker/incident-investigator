@@ -39,6 +39,10 @@ async def _create_and_fetch_ticket() -> tuple[httpx.Response, httpx.Response]:
                 "title": "  Notification delivery is delayed  ",
                 "description": "  The incident timeline shows increasing delivery latency.  ",
                 "requester_email": "oncall@example.com",
+                "investigation_context": {
+                    "incident_id": "00000000-0000-0000-0000-000000000001",
+                    "investigation_run_id": "00000000-0000-0000-0000-000000000002",
+                },
             },
         )
         fetched = await client.get(f"/tickets/{created.json()['id']}")
@@ -54,6 +58,10 @@ async def _create_invalid_ticket() -> httpx.Response:
                 "title": "",
                 "description": "",
                 "requester_email": "oncall@example.com",
+                "investigation_context": {
+                    "incident_id": "00000000-0000-0000-0000-000000000001",
+                    "investigation_run_id": "00000000-0000-0000-0000-000000000002",
+                },
                 "unexpected": "must be rejected",
             },
         )

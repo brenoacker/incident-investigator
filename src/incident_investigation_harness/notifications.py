@@ -8,6 +8,7 @@ from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict, EmailStr
 
+from incident_investigation_harness.context import InvestigationContext
 from incident_investigation_harness.tickets import TicketRepository, find_ticket
 
 
@@ -24,6 +25,7 @@ class NotificationDeliveryResult(StrEnum):
 class NotificationRequestCreate(BaseModel):
     ticket_id: uuid.UUID
     recipient_email: EmailStr
+    investigation_context: InvestigationContext
 
 
 class NotificationRequest(BaseModel):
@@ -36,17 +38,23 @@ class NotificationRequest(BaseModel):
     created_at: datetime
     delivery_result: NotificationDeliveryResult | None = None
     delivered_at: datetime | None = None
+    investigation_context: InvestigationContext
 
 
 class NotificationMessage(BaseModel):
     request_id: uuid.UUID
     ticket_id: uuid.UUID
+    investigation_context: InvestigationContext
 
 
 class NotificationRequestRepository(Protocol):
     def create(self, request: NotificationRequestCreate) -> NotificationRequest: ...
 
     def get(self, request_id: uuid.UUID) -> NotificationRequest | None: ...
+
+    def list_by_investigation_run_id(
+        self, investigation_run_id: uuid.UUID
+    ) -> list[NotificationRequest]: ...
 
     def mark_delivered(
         self,
@@ -62,7 +70,11 @@ class NotificationDelivery(BaseModel):
 
 
 class NotificationProvider(Protocol):
-    def deliver(self, recipient_email: str) -> NotificationDelivery: ...
+    def deliver(
+        self,
+        recipient_email: str,
+        investigation_context: InvestigationContext,
+    ) -> NotificationDelivery: ...
 
 
 class NotificationQueue(Protocol):
@@ -112,7 +124,9 @@ class NotificationWorker:
         if request is None or request.status == NotificationStatus.DELIVERED:
             return
 
-        delivery = self.provider.deliver(request.recipient_email)
+        delivery = self.provider.deliver(
+            request.recipient_email, request.investigation_context
+        )
         if delivery.result == NotificationDeliveryResult.RATE_LIMITED:
             if self.retry_rate_limited:
                 self.queue.publish(message)
@@ -135,10 +149,15 @@ def request_notification(
         NotificationRequestCreate(
             ticket_id=ticket.id,
             recipient_email=ticket.requester_email,
+            investigation_context=ticket.investigation_context,
         )
     )
     queue.publish(
-        NotificationMessage(request_id=request.id, ticket_id=request.ticket_id)
+        NotificationMessage(
+            request_id=request.id,
+            ticket_id=request.ticket_id,
+            investigation_context=request.investigation_context,
+        )
     )
     return request
 

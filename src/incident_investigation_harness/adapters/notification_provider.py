@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from incident_investigation_harness.context import InvestigationContext
 from incident_investigation_harness.notifications import (
     NotificationDelivery,
     NotificationDeliveryResult,
@@ -25,6 +26,7 @@ class ProviderAttempt(BaseModel):
     recipient_email: str
     status_code: int
     result: NotificationDeliveryResult
+    investigation_context: InvestigationContext | None = None
 
 
 class LocalNotificationProvider:
@@ -52,7 +54,11 @@ class LocalNotificationProvider:
         self._attempts.clear()
         self.deliveries.clear()
 
-    def deliver(self, recipient_email: str) -> NotificationDelivery:
+    def deliver(
+        self,
+        recipient_email: str,
+        investigation_context: InvestigationContext | None = None,
+    ) -> NotificationDelivery:
         self.deliveries.append(recipient_email)
         order = len(self._attempts) + 1
         if order <= self._fault_profile.rate_limit_attempts:
@@ -71,6 +77,7 @@ class LocalNotificationProvider:
                 recipient_email=recipient_email,
                 status_code=delivery.status_code,
                 result=delivery.result,
+                investigation_context=investigation_context,
             )
         )
         return delivery

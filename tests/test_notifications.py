@@ -172,6 +172,10 @@ async def _create_ticket_and_request_notification() -> tuple[
                 "title": "Notification delivery is delayed",
                 "description": "The incident timeline shows increasing delivery latency.",
                 "requester_email": "oncall@example.com",
+                "investigation_context": {
+                    "incident_id": "00000000-0000-0000-0000-000000000001",
+                    "investigation_run_id": "00000000-0000-0000-0000-000000000002",
+                },
             },
         )
         requested = await client.post(f"/tickets/{created.json()['id']}/notifications")
@@ -213,6 +217,10 @@ async def _create_notification_with_real_adapters() -> tuple[
                     "title": "Notification persistence integration",
                     "description": "The request must be persisted and queued.",
                     "requester_email": "oncall@example.com",
+                    "investigation_context": {
+                        "incident_id": "00000000-0000-0000-0000-000000000001",
+                        "investigation_run_id": "00000000-0000-0000-0000-000000000002",
+                    },
                 },
             )
             requested = await client.post(
@@ -239,6 +247,10 @@ async def _deliver_notification_with_real_adapters() -> tuple[
                     "title": "Notification worker integration",
                     "description": "The worker must persist the delivery result.",
                     "requester_email": "oncall@example.com",
+                    "investigation_context": {
+                        "incident_id": "00000000-0000-0000-0000-000000000001",
+                        "investigation_run_id": "00000000-0000-0000-0000-000000000002",
+                    },
                 },
             )
             requested = await client.post(

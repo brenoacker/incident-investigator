@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from incident_investigation_harness.api.dependencies import (
     get_notification_queue,
@@ -58,3 +58,15 @@ def get_notification_request(
         raise HTTPException(
             status_code=404, detail="notification request not found"
         ) from error
+
+
+@router.get(
+    "/notification-requests", status_code=200, response_model=list[NotificationRequest]
+)
+def list_notification_requests(
+    investigation_run_id: UUID = Query(...),
+    repository: NotificationRequestRepository = Depends(
+        get_notification_request_repository
+    ),
+) -> list[NotificationRequest]:
+    return repository.list_by_investigation_run_id(investigation_run_id)
