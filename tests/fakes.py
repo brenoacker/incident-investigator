@@ -49,6 +49,19 @@ class InMemoryNotificationRequestRepository:
     def get(self, request_id: uuid.UUID) -> NotificationRequest | None:
         return self.requests.get(request_id)
 
+    def mark_delivered(
+        self, request_id: uuid.UUID, result: str, delivered_at: datetime
+    ) -> NotificationRequest:
+        request = self.requests[request_id].model_copy(
+            update={
+                "status": "delivered",
+                "delivery_result": result,
+                "delivered_at": delivered_at,
+            }
+        )
+        self.requests[request_id] = request
+        return request
+
 
 class InMemoryNotificationQueue:
     def __init__(self) -> None:

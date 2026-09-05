@@ -98,8 +98,17 @@ class PostgresNotificationRequestRepository:
                     ticket_id UUID NOT NULL REFERENCES tickets(id),
                     recipient_email VARCHAR(320) NOT NULL,
                     status VARCHAR(32) NOT NULL,
-                    created_at TIMESTAMPTZ NOT NULL
+                    created_at TIMESTAMPTZ NOT NULL,
+                    delivery_result VARCHAR(64),
+                    delivered_at TIMESTAMPTZ
                 )
+                """
+            )
+            connection.execute(
+                """
+                ALTER TABLE notification_requests
+                ADD COLUMN IF NOT EXISTS delivery_result VARCHAR(64),
+                ADD COLUMN IF NOT EXISTS delivered_at TIMESTAMPTZ
                 """
             )
 
@@ -132,7 +141,8 @@ class PostgresNotificationRequestRepository:
         with psycopg.connect(self.database_url) as connection:
             row = connection.execute(
                 """
-                SELECT id, ticket_id, recipient_email, status, created_at
+                SELECT id, ticket_id, recipient_email, status, created_at,
+                       delivery_result, delivered_at
                 FROM notification_requests
                 WHERE id = %s
                 """,
@@ -146,6 +156,34 @@ class PostgresNotificationRequestRepository:
             recipient_email=row[2],
             status=row[3],
             created_at=row[4],
+            delivery_result=row[5],
+            delivered_at=row[6],
+        )
+
+    def mark_delivered(
+        self, request_id: uuid.UUID, result: str, delivered_at: datetime
+    ) -> NotificationRequest:
+        with psycopg.connect(self.database_url) as connection:
+            row = connection.execute(
+                """
+                UPDATE notification_requests
+                SET status = 'delivered', delivery_result = %s, delivered_at = %s
+                WHERE id = %s
+                RETURNING id, ticket_id, recipient_email, status, created_at,
+                          delivery_result, delivered_at
+                """,
+                (result, delivered_at, request_id),
+            ).fetchone()
+        if row is None:
+            raise ValueError(f"notification request {request_id} not found")
+        return NotificationRequest(
+            id=row[0],
+            ticket_id=row[1],
+            recipient_email=row[2],
+            status=row[3],
+            created_at=row[4],
+            delivery_result=row[5],
+            delivered_at=row[6],
         )
 
 

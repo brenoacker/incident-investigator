@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict, EmailStr
@@ -22,6 +22,8 @@ class NotificationRequest(BaseModel):
     recipient_email: EmailStr
     status: str
     created_at: datetime
+    delivery_result: str | None = None
+    delivered_at: datetime | None = None
 
 
 class NotificationMessage(BaseModel):
@@ -34,6 +36,18 @@ class NotificationRequestRepository(Protocol):
 
     def get(self, request_id: uuid.UUID) -> NotificationRequest | None: ...
 
+    def mark_delivered(
+        self, request_id: uuid.UUID, result: str, delivered_at: datetime
+    ) -> NotificationRequest: ...
+
+
+class NotificationDelivery(BaseModel):
+    result: str
+
+
+class NotificationProvider(Protocol):
+    def deliver(self, recipient_email: str) -> NotificationDelivery: ...
+
 
 class NotificationQueue(Protocol):
     def publish(self, message: NotificationMessage) -> None: ...
@@ -43,6 +57,37 @@ class NotificationQueue(Protocol):
 
 class NotificationRequestNotFound(Exception):
     """Raised when a requested notification request does not exist."""
+
+
+class NotificationWorker:
+    def __init__(
+        self,
+        request_repository: NotificationRequestRepository,
+        queue: NotificationQueue,
+        provider: NotificationProvider,
+    ) -> None:
+        self.request_repository = request_repository
+        self.queue = queue
+        self.provider = provider
+
+    async def process_next(self) -> bool:
+        message = self.queue.pop()
+        if message is None:
+            return False
+        await self.process(message)
+        return True
+
+    async def process(self, message: NotificationMessage) -> None:
+        request = self.request_repository.get(message.request_id)
+        if request is None or request.status == "delivered":
+            return
+
+        delivery = self.provider.deliver(request.recipient_email)
+        self.request_repository.mark_delivered(
+            request.id,
+            delivery.result,
+            datetime.now(timezone.utc),
+        )
 
 
 def request_notification(
