@@ -70,6 +70,8 @@ class NotificationQueue(Protocol):
 
     def pop(self) -> NotificationMessage | None: ...
 
+    def depth(self) -> int: ...
+
 
 class NotificationRequestNotFound(Exception):
     """Raised when a requested notification request does not exist."""
@@ -81,10 +83,12 @@ class NotificationWorker:
         request_repository: NotificationRequestRepository,
         queue: NotificationQueue,
         provider: NotificationProvider,
+        retry_rate_limited: bool = False,
     ) -> None:
         self.request_repository = request_repository
         self.queue = queue
         self.provider = provider
+        self.retry_rate_limited = retry_rate_limited
 
     async def process_next(self) -> bool:
         message = self.queue.pop()
@@ -110,6 +114,8 @@ class NotificationWorker:
 
         delivery = self.provider.deliver(request.recipient_email)
         if delivery.result == NotificationDeliveryResult.RATE_LIMITED:
+            if self.retry_rate_limited:
+                self.queue.publish(message)
             return
         self.request_repository.mark_delivered(
             request.id,
