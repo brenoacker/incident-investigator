@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import Counter
+from math import ceil
 import uuid
 from enum import StrEnum
 
@@ -27,6 +28,43 @@ class ScenarioName(StrEnum):
     HEALTHY_REFERENCE = "healthy-reference"
 
 
+class TrafficProfile(BaseModel):
+    """Controlled traffic applied to one scenario execution."""
+
+    model_config = ConfigDict(frozen=True)
+
+    rounds: int = Field(gt=0)
+    batch_size: int = Field(gt=0)
+    work_per_round: int = Field(ge=0)
+
+
+class LatencyMeasurement(BaseModel):
+    """Deterministic latency evidence for one operation and observation window."""
+
+    model_config = ConfigDict(frozen=True)
+
+    operation: str = Field(min_length=1)
+    window: str = Field(min_length=1)
+    samples: tuple[float, ...] = Field(min_length=1)
+    p99: float = Field(ge=0)
+
+    @property
+    def sample_count(self) -> int:
+        return len(self.samples)
+
+
+class ScenarioComparison(BaseModel):
+    """Comparison of reference and Retry Storm latency evidence."""
+
+    model_config = ConfigDict(frozen=True)
+
+    reference: OperationalSnapshot
+    retry_storm: OperationalSnapshot
+    degradation_threshold_percent: float = Field(gt=0)
+    p99_degradation_percent: float
+    is_degraded: bool
+
+
 class OperationalSnapshot(BaseModel):
     """Read-only operational evidence for one completed scenario execution."""
 
@@ -41,14 +79,13 @@ class OperationalSnapshot(BaseModel):
     initial_backlog: int = Field(ge=0)
     final_backlog: int = Field(ge=0)
     peak_backlog: int = Field(ge=0)
+    latency: LatencyMeasurement
 
 
 class _Scenario:
     name: ScenarioName
-    traffic_batch_size: int
-    work_per_round: int
     rate_limit_attempts: int
-    rounds: int = 8
+    traffic_profile: TrafficProfile
 
     def __init__(self) -> None:
         self.execution_number = 0
@@ -83,10 +120,11 @@ class _Scenario:
             retry_rate_limited=self.rate_limit_attempts > 0,
         )
         attempts_by_request: Counter[str] = Counter()
+        latency_samples: list[float] = []
         peak_backlog = queue.depth()
 
-        for _ in range(self.rounds):
-            for _ in range(self.traffic_batch_size):
+        for _ in range(self.traffic_profile.rounds):
+            for _ in range(self.traffic_profile.batch_size):
                 request_index = len(request_repository.requests)
                 request = request_repository.create(
                     NotificationRequestCreate(
@@ -106,12 +144,15 @@ class _Scenario:
                 )
             peak_backlog = max(peak_backlog, queue.depth())
 
-            for _ in range(self.work_per_round):
+            for _ in range(self.traffic_profile.work_per_round):
                 message = queue.pop()
                 if message is None:
                     break
                 attempts_by_request[str(message.request_id)] += 1
                 await worker.process(message)
+                # The harness measures processing latency in deterministic
+                # work units, including the backlog left by the operation.
+                latency_samples.append(float(1 + queue.depth()))
                 peak_backlog = max(peak_backlog, queue.depth())
 
         rate_limited_attempts = sum(
@@ -127,6 +168,12 @@ class _Scenario:
             initial_backlog=0,
             final_backlog=queue.depth(),
             peak_backlog=peak_backlog,
+            latency=LatencyMeasurement(
+                operation="notification-processing",
+                window=f"{self.traffic_profile.rounds} traffic rounds",
+                samples=tuple(latency_samples),
+                p99=_percentile(latency_samples, 0.99),
+            ),
         )
 
 
@@ -134,8 +181,7 @@ class RetryStormScenario(_Scenario):
     """Deterministic scenario with unbounded immediate retries after 429."""
 
     name = ScenarioName.RETRY_STORM
-    traffic_batch_size = 2
-    work_per_round = 1
+    traffic_profile = TrafficProfile(rounds=8, batch_size=2, work_per_round=1)
     rate_limit_attempts = 1000
 
 
@@ -143,6 +189,33 @@ class HealthyScenario(_Scenario):
     """Deterministic no-fault reference scenario with enough worker capacity."""
 
     name = ScenarioName.HEALTHY_REFERENCE
-    traffic_batch_size = 2
-    work_per_round = 2
+    traffic_profile = TrafficProfile(rounds=8, batch_size=2, work_per_round=2)
     rate_limit_attempts = 0
+
+
+def _percentile(samples: list[float], percentile: float) -> float:
+    ordered_samples = sorted(samples)
+    rank = max(1, ceil(percentile * len(ordered_samples)))
+    return ordered_samples[rank - 1]
+
+
+def compare_scenarios(
+    reference: OperationalSnapshot,
+    retry_storm: OperationalSnapshot,
+    *,
+    degradation_threshold_percent: float = 25.0,
+) -> ScenarioComparison:
+    """Compare p99 latency without requiring equal execution durations."""
+    reference_p99 = reference.latency.p99
+    p99_degradation_percent = (
+        (retry_storm.latency.p99 - reference_p99) / reference_p99 * 100
+        if reference_p99
+        else 0.0
+    )
+    return ScenarioComparison(
+        reference=reference,
+        retry_storm=retry_storm,
+        degradation_threshold_percent=degradation_threshold_percent,
+        p99_degradation_percent=p99_degradation_percent,
+        is_degraded=p99_degradation_percent >= degradation_threshold_percent,
+    )
