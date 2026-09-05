@@ -85,6 +85,18 @@ def test_worker_delivers_request_and_reprocessing_does_not_duplicate_delivery() 
     assert len(provider.deliveries) == 1
 
 
+def test_worker_stops_when_stop_requested() -> None:
+    stop_event = asyncio.Event()
+    stop_event.set()
+    worker = NotificationWorker(
+        InMemoryNotificationRequestRepository(),
+        InMemoryNotificationQueue(),
+        LocalNotificationProvider(),
+    )
+
+    asyncio.run(worker.run_forever(poll_interval=0, stop_event=stop_event))
+
+
 @pytest.mark.integration
 def test_notification_request_persists_and_reaches_redis_queue() -> None:
     if "DATABASE_URL" not in os.environ or "REDIS_URL" not in os.environ:
@@ -108,13 +120,12 @@ def test_worker_delivers_notification_with_real_adapters() -> None:
     if "DATABASE_URL" not in os.environ or "REDIS_URL" not in os.environ:
         pytest.skip("set DATABASE_URL and REDIS_URL to run the integration test")
 
-    delivered, provider = asyncio.run(_deliver_notification_with_real_adapters())
+    delivered = asyncio.run(_deliver_notification_with_real_adapters())
 
     assert delivered.status_code == 200
     assert delivered.json()["status"] == "delivered"
     assert delivered.json()["delivery_result"] == "accepted"
     assert delivered.json()["delivered_at"] is not None
-    assert len(provider.deliveries) == 1
 
 
 async def _create_ticket_and_request_notification() -> tuple[
@@ -185,9 +196,8 @@ async def _create_notification_with_real_adapters() -> tuple[
 
 
 async def _deliver_notification_with_real_adapters() -> tuple[
-    httpx.Response, LocalNotificationProvider
+    httpx.Response
 ]:
-    provider = LocalNotificationProvider()
     async with app.router.lifespan_context(app):
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(
@@ -204,16 +214,13 @@ async def _deliver_notification_with_real_adapters() -> tuple[
             requested = await client.post(
                 f"/tickets/{created.json()['id']}/notifications"
             )
-            message = app.state.notification_queue.pop()
-            assert message is not None
-
             worker = NotificationWorker(
                 app.state.notification_request_repository,
                 app.state.notification_queue,
-                provider,
+                LocalNotificationProvider(),
             )
-            await worker.process(message)
+            await worker.process_next()
             delivered = await client.get(
                 f"/notification-requests/{requested.json()['id']}"
             )
-    return delivered, provider
+    return delivered

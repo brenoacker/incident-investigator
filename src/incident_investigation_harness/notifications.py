@@ -1,12 +1,23 @@
 from __future__ import annotations
 
+import asyncio
 import uuid
 from datetime import datetime, timezone
+from enum import StrEnum
 from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict, EmailStr
 
 from incident_investigation_harness.tickets import TicketRepository, find_ticket
+
+
+class NotificationStatus(StrEnum):
+    PENDING = "pending"
+    DELIVERED = "delivered"
+
+
+class NotificationDeliveryResult(StrEnum):
+    ACCEPTED = "accepted"
 
 
 class NotificationRequestCreate(BaseModel):
@@ -20,9 +31,9 @@ class NotificationRequest(BaseModel):
     id: uuid.UUID
     ticket_id: uuid.UUID
     recipient_email: EmailStr
-    status: str
+    status: NotificationStatus
     created_at: datetime
-    delivery_result: str | None = None
+    delivery_result: NotificationDeliveryResult | None = None
     delivered_at: datetime | None = None
 
 
@@ -37,12 +48,15 @@ class NotificationRequestRepository(Protocol):
     def get(self, request_id: uuid.UUID) -> NotificationRequest | None: ...
 
     def mark_delivered(
-        self, request_id: uuid.UUID, result: str, delivered_at: datetime
+        self,
+        request_id: uuid.UUID,
+        result: NotificationDeliveryResult,
+        delivered_at: datetime,
     ) -> NotificationRequest: ...
 
 
 class NotificationDelivery(BaseModel):
-    result: str
+    result: NotificationDeliveryResult
 
 
 class NotificationProvider(Protocol):
@@ -77,9 +91,19 @@ class NotificationWorker:
         await self.process(message)
         return True
 
+    async def run_forever(
+        self,
+        poll_interval: float = 0.1,
+        stop_event: asyncio.Event | None = None,
+    ) -> None:
+        while stop_event is None or not stop_event.is_set():
+            processed = await self.process_next()
+            if not processed:
+                await asyncio.sleep(poll_interval)
+
     async def process(self, message: NotificationMessage) -> None:
         request = self.request_repository.get(message.request_id)
-        if request is None or request.status == "delivered":
+        if request is None or request.status == NotificationStatus.DELIVERED:
             return
 
         delivery = self.provider.deliver(request.recipient_email)

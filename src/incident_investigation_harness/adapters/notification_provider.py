@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from incident_investigation_harness.notifications import NotificationDelivery
+from incident_investigation_harness.notifications import (
+    NotificationDelivery,
+    NotificationDeliveryResult,
+)
 
 
 class LocalNotificationProvider:
@@ -11,4 +14,4 @@ class LocalNotificationProvider:
 
     def deliver(self, recipient_email: str) -> NotificationDelivery:
         self.deliveries.append(recipient_email)
-        return NotificationDelivery(result="accepted")
+        return NotificationDelivery(result=NotificationDeliveryResult.ACCEPTED)
