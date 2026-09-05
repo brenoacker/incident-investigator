@@ -22,8 +22,11 @@ services:
       - "8000:8000"
     environment:
       DATABASE_URL: postgresql://ticketing:ticketing@db:5432/ticketing
+      REDIS_URL: redis://redis:6379/0
     depends_on:
       db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     healthcheck:
       test:
@@ -37,6 +40,16 @@ services:
       timeout: 3s
       retries: 5
       start_period: 5s
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
 volumes:
   ticketing-data:

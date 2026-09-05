@@ -76,6 +76,14 @@ curl -X POST http://localhost:8000/tickets \
 curl http://localhost:8000/tickets/{ticket-id}
 ```
 
+Solicite a notificação do ticket. O pedido usa o `requester_email`, começa com
+status `pending` e é publicado na lista Redis `notification_requests`:
+
+```sh
+curl -X POST http://localhost:8000/tickets/{ticket-id}/notifications
+curl http://localhost:8000/notification-requests/{request-id}
+```
+
 Os tickets ficam no volume Docker `ticketing-data` e continuam disponíveis após
 reiniciar o processo da API.
 
