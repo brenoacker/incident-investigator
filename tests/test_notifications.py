@@ -10,9 +10,11 @@ import pytest
 from incident_investigation_harness.app import app
 from incident_investigation_harness.adapters.notification_provider import (
     LocalNotificationProvider,
+    ProviderFaultProfile,
 )
 from incident_investigation_harness.notifications import (
     NotificationMessage,
+    NotificationStatus,
     NotificationWorker,
 )
 from tests.fakes import (
@@ -83,6 +85,34 @@ def test_worker_delivers_request_and_reprocessing_does_not_duplicate_delivery() 
     assert delivered.json()["delivery_result"] == "accepted"
     assert delivered.json()["delivered_at"] is not None
     assert len(provider.deliveries) == 1
+
+
+def test_worker_does_not_mark_rate_limited_request_as_delivered() -> None:
+    ticket_repository = InMemoryTicketRepository()
+    notification_repository = InMemoryNotificationRequestRepository()
+    queue = InMemoryNotificationQueue()
+    provider = LocalNotificationProvider()
+    provider.configure_fault_profile(ProviderFaultProfile(rate_limit_attempts=1))
+    app.state.ticket_repository = ticket_repository
+    app.state.notification_request_repository = notification_repository
+    app.state.notification_queue = queue
+
+    created, requested, _, message = asyncio.run(
+        _create_ticket_and_request_notification()
+    )
+    assert created.status_code == 201
+    assert requested.status_code == 201
+    assert message is not None
+
+    worker = NotificationWorker(notification_repository, queue, provider)
+    asyncio.run(worker.process(message))
+
+    pending = asyncio.run(_get_notification_request(requested.json()["id"]))
+
+    assert pending.status_code == 200
+    assert pending.json()["status"] == NotificationStatus.PENDING
+    assert pending.json()["delivery_result"] is None
+    assert pending.json()["delivered_at"] is None
 
 
 def test_worker_stops_when_stop_requested() -> None:

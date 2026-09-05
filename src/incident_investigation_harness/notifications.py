@@ -109,6 +109,8 @@ class NotificationWorker:
             return
 
         delivery = self.provider.deliver(request.recipient_email)
+        if delivery.result == NotificationDeliveryResult.RATE_LIMITED:
+            return
         self.request_repository.mark_delivered(
             request.id,
             delivery.result,
