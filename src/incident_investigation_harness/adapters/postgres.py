@@ -6,6 +6,10 @@ from datetime import datetime, timezone
 
 import psycopg
 
+from incident_investigation_harness.notifications import (
+    NotificationRequest,
+    NotificationRequestCreate,
+)
 from incident_investigation_harness.tickets import Ticket, TicketCreate
 
 
@@ -76,6 +80,72 @@ class PostgresTicketRepository:
             requester_email=row[3],
             status=row[4],
             created_at=row[5],
+        )
+
+
+class PostgresNotificationRequestRepository:
+    """PostgreSQL adapter for persisted notification requests."""
+
+    def __init__(self, database_url: str) -> None:
+        self.database_url = database_url
+
+    def initialize(self) -> None:
+        with psycopg.connect(self.database_url) as connection:
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS notification_requests (
+                    id UUID PRIMARY KEY,
+                    ticket_id UUID NOT NULL REFERENCES tickets(id),
+                    recipient_email VARCHAR(320) NOT NULL,
+                    status VARCHAR(32) NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL
+                )
+                """
+            )
+
+    def create(self, request: NotificationRequestCreate) -> NotificationRequest:
+        created = NotificationRequest(
+            id=uuid.uuid4(),
+            ticket_id=request.ticket_id,
+            recipient_email=request.recipient_email,
+            status="pending",
+            created_at=datetime.now(timezone.utc),
+        )
+        with psycopg.connect(self.database_url) as connection:
+            connection.execute(
+                """
+                INSERT INTO notification_requests
+                    (id, ticket_id, recipient_email, status, created_at)
+                VALUES (%s, %s, %s, %s, %s)
+                """,
+                (
+                    created.id,
+                    created.ticket_id,
+                    created.recipient_email,
+                    created.status,
+                    created.created_at,
+                ),
+            )
+        return created
+
+    def get(self, request_id: uuid.UUID) -> NotificationRequest | None:
+        with psycopg.connect(self.database_url) as connection:
+            row = connection.execute(
+                """
+                SELECT id, ticket_id, recipient_email, status, created_at
+                FROM notification_requests
+                WHERE id = %s
+                """,
+                (request_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return NotificationRequest(
+            id=row[0],
+            ticket_id=row[1],
+            recipient_email=row[2],
+            status=row[3],
+            created_at=row[4],
         )
 
 
