@@ -1,9 +1,30 @@
 services:
+  db:
+    image: postgres:17-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: ticketing
+      POSTGRES_USER: ticketing
+      POSTGRES_PASSWORD: ticketing
+    volumes:
+      - ticketing-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ticketing -d ticketing"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   harness:
     build:
       context: .
     ports:
       - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://ticketing:ticketing@db:5432/ticketing
+    depends_on:
+      db:
+        condition: service_healthy
     healthcheck:
       test:
         - CMD
@@ -16,3 +37,6 @@ services:
       timeout: 3s
       retries: 5
       start_period: 5s
+
+volumes:
+  ticketing-data:
