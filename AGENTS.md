@@ -35,6 +35,18 @@ Toda funcionalidade implementada deve ter testes que exercitem seu comportamento
 4. Se qualquer verificação falhar, diagnostique a causa, corrija o código ou teste e execute novamente todas as verificações afetadas.
 5. Só declare a implementação pronta quando as verificações executadas passarem; testes ignorados ou não executados não contam como aprovação.
 
+## Ciclo de code review
+
+Depois de implementar e verificar o codigo, execute a skill `code-review` do Matt Pocock contra o ticket, o diff e os padroes do repositorio.
+
+1. Registre cada finding da revisao, incluindo gaps de especificacao, riscos e testes ausentes.
+2. Implemente todos os findings acionaveis antes do handoff ou da PR.
+3. Execute novamente os testes e as verificacoes estaticas depois de cada correcao.
+4. Repita o `code-review` sobre o novo diff ate nao haver mais findings acionaveis.
+5. So declare o trabalho pronto quando testes, verificacoes e revisao estiverem sem gaps pendentes.
+
+`code-review` complementa os testes: testes demonstram comportamento executado; a revisao verifica cobertura contra especificacao, padroes e riscos que os testes podem nao detectar.
+
 ## Skills relevantes
 
 - `implement`: executar um ticket ou especificação de ponta a ponta.
