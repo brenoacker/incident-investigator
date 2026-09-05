@@ -1,13 +1,14 @@
 from incident_investigation_harness.scenarios import (
     HealthyScenario,
     RetryStormScenario,
+    ScenarioName,
 )
 
 
 def test_retry_storm_amplifies_attempts_and_backlog() -> None:
     snapshot = RetryStormScenario().run()
 
-    assert snapshot.scenario == "retry-storm"
+    assert snapshot.scenario is ScenarioName.RETRY_STORM
     assert snapshot.rate_limited_attempts > 0
     assert snapshot.total_attempts >= snapshot.rate_limited_attempts
     assert snapshot.max_attempts_per_request > 1
@@ -18,7 +19,7 @@ def test_retry_storm_amplifies_attempts_and_backlog() -> None:
 def test_healthy_scenario_provides_operational_reference() -> None:
     snapshot = HealthyScenario().run()
 
-    assert snapshot.scenario == "healthy-reference"
+    assert snapshot.scenario is ScenarioName.HEALTHY_REFERENCE
     assert snapshot.rate_limited_attempts == 0
     assert snapshot.total_attempts == snapshot.request_count
     assert snapshot.max_attempts_per_request == 1

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections import Counter
 import uuid
+from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -21,12 +22,17 @@ from incident_investigation_harness.notifications import (
 )
 
 
+class ScenarioName(StrEnum):
+    RETRY_STORM = "retry-storm"
+    HEALTHY_REFERENCE = "healthy-reference"
+
+
 class OperationalSnapshot(BaseModel):
     """Read-only operational evidence for one completed scenario execution."""
 
     model_config = ConfigDict(frozen=True)
 
-    scenario: str
+    scenario: ScenarioName
     execution_number: int = Field(gt=0)
     request_count: int = Field(ge=0)
     total_attempts: int = Field(ge=0)
@@ -38,7 +44,7 @@ class OperationalSnapshot(BaseModel):
 
 
 class _Scenario:
-    name: str
+    name: ScenarioName
     traffic_batch_size: int
     work_per_round: int
     rate_limit_attempts: int
@@ -127,7 +133,7 @@ class _Scenario:
 class RetryStormScenario(_Scenario):
     """Deterministic scenario with unbounded immediate retries after 429."""
 
-    name = "retry-storm"
+    name = ScenarioName.RETRY_STORM
     traffic_batch_size = 2
     work_per_round = 1
     rate_limit_attempts = 1000
@@ -136,7 +142,7 @@ class RetryStormScenario(_Scenario):
 class HealthyScenario(_Scenario):
     """Deterministic no-fault reference scenario with enough worker capacity."""
 
-    name = "healthy-reference"
+    name = ScenarioName.HEALTHY_REFERENCE
     traffic_batch_size = 2
     work_per_round = 2
     rate_limit_attempts = 0
