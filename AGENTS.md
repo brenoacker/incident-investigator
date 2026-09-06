@@ -70,3 +70,10 @@ Usa `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human` e `wontfi
 ### Domain docs
 
 Repositório single-context: `CONTEXT.md` na raiz e ADRs em `docs/adr/`. Veja `docs/agents/domain.md`.
+
+### Naming de adapters e fakes
+
+- Use `Adapter` como sufixo para uma implementação concreta de uma port/interface, especialmente quando ela integra infraestrutura real.
+- Use `Fake` como sufixo para substitutos determinísticos usados em testes, fixtures ou desenvolvimento local.
+- Não use `InMemory` em nomes de tipos ou módulos; o armazenamento em memória é um detalhe de implementação, enquanto `Adapter` e `Fake` comunicam o papel do código.
+- Quando uma implementação puder ser descrita pelos dois papéis, prefira `Fake` se ela existir para testes/fixtures e reserve `Adapter` para a integração real.
