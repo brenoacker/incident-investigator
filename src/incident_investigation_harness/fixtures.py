@@ -10,6 +10,7 @@ from incident_investigation_harness.adapters.incident_evidence import (
 from incident_investigation_harness.adapters.knowledge_evidence import (
     KnowledgeEvidenceAdapter,
 )
+from incident_investigation_harness.adapters.source_evidence import SourceEvidenceAdapter
 from incident_investigation_harness.context import InvestigationContext
 from incident_investigation_harness.evidence import TimelineEvent, TicketComment
 from incident_investigation_harness.tickets import Ticket
@@ -71,6 +72,20 @@ def build_knowledge_evidence_repository() -> KnowledgeEvidenceAdapter:
                 "docs/adr/0001-postgresql-for-ticket-persistence.md",
             }
         ),
+    )
+
+
+def build_source_evidence_repository() -> SourceEvidenceAdapter:
+    """Build the explicit read-only source and Git allowlist for local MCP use."""
+    return SourceEvidenceAdapter.from_allowlist(
+        Path("."),
+        paths=frozenset(
+            {
+                "src/incident_investigation_harness/evidence.py",
+                "src/incident_investigation_harness/source_evidence.py",
+            }
+        ),
+        refs=frozenset({"HEAD"}),
     )
 
 

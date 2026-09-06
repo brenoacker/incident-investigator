@@ -109,5 +109,20 @@ services:
         "incident_investigation_harness.mcp.knowledge_mcp"
       ]
 
+  source-mcp:
+    build:
+      context: .
+    ports:
+      - "8004:8004"
+    command:
+      [
+        "uv",
+        "run",
+        "--no-sync",
+        "python",
+        "-m",
+        "incident_investigation_harness.mcp.source_mcp"
+      ]
+
 volumes:
   ticketing-data:
