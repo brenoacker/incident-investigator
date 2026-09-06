@@ -94,5 +94,20 @@ services:
         "incident_investigation_harness.mcp.operations_mcp"
       ]
 
+  knowledge-mcp:
+    build:
+      context: .
+    ports:
+      - "8003:8003"
+    command:
+      [
+        "uv",
+        "run",
+        "--no-sync",
+        "python",
+        "-m",
+        "incident_investigation_harness.mcp.knowledge_mcp"
+      ]
+
 volumes:
   ticketing-data:

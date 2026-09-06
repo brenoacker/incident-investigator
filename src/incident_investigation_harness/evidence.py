@@ -16,6 +16,7 @@ EvidenceType = Literal[
     "operational-log",
     "operational-metric",
     "operational-trace",
+    "knowledge-document",
 ]
 
 
@@ -24,7 +25,7 @@ class EvidenceCitation(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    provider: Literal["incident-mcp", "operations-mcp"]
+    provider: Literal["incident-mcp", "operations-mcp", "knowledge-mcp"]
     incident_id: uuid.UUID
     investigation_run_id: uuid.UUID
     evidence_type: EvidenceType

@@ -17,6 +17,12 @@
 
 If a proposal conflicts with an ADR or a term in `CONTEXT.md`, flag the conflict before implementing.
 
+## Repository skills
+
+The repository's skills are stored in `.agents/skills/`. Before choosing a workflow, inspect that directory and treat every immediate subdirectory containing `SKILL.md` as an available repository skill. When a task names a repository skill, read its complete `.agents/skills/<skill-name>/SKILL.md` before taking task actions. If a skill references another file, resolve that path relative to its own directory and read it when the skill requires it.
+
+Prefer repository skills over similarly named global skills when both exist. Use the skill's name and description to decide whether it applies; do not assume the static list below is exhaustive.
+
 ## Living workflow documentation
 
 Before finalizing any change or addition that affects system behavior, compare it with `docs/system-workflow.md` and update that file if the map, a table, or a Mermaid diagram no longer represents the implemented behavior. Clearly mark what is implemented and what remains planned.
@@ -54,13 +60,15 @@ After implementing and verifying the code, run the Matt Pocock `code-review` ski
 
 ## Relevant skills
 
-- `implement`: execute a ticket or specification end to end.
-- `tdd`: develop features with the red-green-refactor cycle.
-- `codebase-design`: design interfaces, ports, adapters and seams.
-- `diagnosing-bugs`: reproduce and fix failures or regressions.
-- `code-review`: review implementation against standards and specification.
-- `domain-modeling`: change language, context or domain decisions.
-- `writing-for-agents`: modify `AGENTS.md` or another agent instruction.
+These are common repository skills; discover the authoritative set under `.agents/skills/` before starting work:
+
+- `.agents/skills/implement`: execute a ticket or specification end to end.
+- `.agents/skills/tdd`: develop features with the red-green-refactor cycle.
+- `.agents/skills/codebase-design`: design interfaces, ports, adapters and seams.
+- `.agents/skills/diagnosing-bugs`: reproduce and fix failures or regressions.
+- `.agents/skills/code-review`: review implementation against standards and specification.
+- `.agents/skills/domain-modeling`: change language, context or domain decisions.
+- `.agents/skills/writing-for-agents`: modify `AGENTS.md` or another agent instruction.
 
 ## Repository conventions
 

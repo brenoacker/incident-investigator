@@ -138,14 +138,16 @@ Codex starts with the incident ticket and queries the sources it needs. Each sou
 | --- | --- | --- |
 | `incident-mcp` | Incident ticket, comments and timeline | Implemented and available in Compose |
 | `operations-mcp` | Operational logs, metrics and traces | Implemented and available in Compose |
-| `knowledge-mcp` | Relevant runbooks and ADRs | Planned in the specification; no service in Compose yet |
+| `knowledge-mcp` | Explicitly allowlisted runbooks and ADRs | Implemented and available in Compose |
 | `source-mcp` | Code, diff and Git history | Planned in the specification; no service in Compose yet |
+
+The current `knowledge-mcp` allowlist contains `docs/scenarios/retry-storm-latency.md` and `docs/adr/0001-postgresql-for-ticket-persistence.md`. It returns the authorized document, a relevant excerpt and a citation; source code and Git history remain outside its surface.
 
 ```mermaid
 flowchart TD
     Codex[Codex in Read-Only Investigation] --> Incident[incident-mcp]
     Codex --> Operations[operations-mcp]
-    Codex -. planned .-> Knowledge[knowledge-mcp]
+    Codex --> Knowledge[knowledge-mcp]
     Codex -. planned .-> Source[source-mcp]
     Incident --> I[Ticket, comments, timeline]
     Operations --> O[Logs, metrics, traces]
