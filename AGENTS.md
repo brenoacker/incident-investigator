@@ -1,72 +1,84 @@
-## Antes de implementar
+## Before implementing
 
-1. Leia `CONTEXT.md` para conhecer a linguagem ubíqua e o modelo do domínio.
-2. Leia o ticket no GitHub com `gh issue view <number> --comments`, incluindo bloqueios e critérios de aceite.
-3. Leia os ADRs em `docs/adr/` que afetem a área modificada.
-4. Consulte o código e os testes existentes antes de escolher o seam da mudança.
-5. Transforme cada critério de aceite relevante em uma verificação observável.
+1. Read `CONTEXT.md` to learn the ubiquitous language and domain model.
+2. Read the GitHub ticket with `gh issue view <number> --comments`, including blockers and acceptance criteria.
+3. Read the ADRs in `docs/adr/` that affect the area being changed.
+4. Inspect existing code and tests before choosing the change seam.
+5. Turn each relevant acceptance criterion into an observable verification.
 
-## Fontes de verdade
+## Sources of truth
 
-- `CONTEXT.md`: linguagem ubíqua e modelo do domínio.
-- `docs/adr/`: decisões arquiteturais vigentes.
-- `docs/agents/domain.md`: como consumir documentação de domínio.
-- `docs/agents/issue-tracker.md`: comandos e convenções do GitHub Issues.
-- `docs/agents/triage-labels.md`: vocabulário e estados de triagem.
+- `CONTEXT.md`: ubiquitous language and domain model.
+- `docs/system-workflow.md`: friendly, high-level view of all system flows, including Evidence Providers via MCP. Read it when changing or adding components, states, integrations, permissions, flow steps, the Investigation Report format, the Quality Gate, or observability; update it in the same change.
+- `docs/adr/`: current architectural decisions.
+- `docs/agents/domain.md`: how to consume domain documentation.
+- `docs/agents/issue-tracker.md`: GitHub Issues commands and conventions.
+- `docs/agents/triage-labels.md`: triage vocabulary and states.
 
-Se uma proposta contradisser um ADR ou um termo de `CONTEXT.md`, sinalize o conflito antes de implementar.
+If a proposal conflicts with an ADR or a term in `CONTEXT.md`, flag the conflict before implementing.
 
-## Fluxo de implementação
+## Living workflow documentation
 
-1. Identifique o módulo, a interface e o seam que serão alterados.
-2. Escreva ou ajuste testes na interface pública relevante.
-3. Implemente a menor mudança que satisfaz o ticket.
-4. Execute testes, type checking, linting e build quando estiverem configurados.
-5. Compare a implementação novamente com todos os critérios do ticket.
-6. Preserve alterações não relacionadas e nunca descarte trabalho existente sem autorização.
+Before finalizing any change or addition that affects system behavior, compare it with `docs/system-workflow.md` and update that file if the map, a table, or a Mermaid diagram no longer represents the implemented behavior. Clearly mark what is implemented and what remains planned.
 
-## Regra de verificação
+## Implementation workflow
 
-Toda funcionalidade implementada deve ter testes que exercitem seu comportamento observável na interface pública relevante.
+1. Identify the module, interface and seam to change.
+2. Write or adjust tests at the relevant public interface.
+3. Implement the smallest change that satisfies the ticket.
+4. Run tests, type checking, linting and build when configured.
+5. Compare the implementation again with every ticket criterion.
+6. Preserve unrelated changes and never discard existing work without authorization.
 
-1. Escreva ou atualize os testes junto com a implementação.
-2. Execute a suíte completa após cada mudança de código.
-3. Execute também type checking, linting e build quando estiverem configurados.
-4. Se qualquer verificação falhar, diagnostique a causa, corrija o código ou teste e execute novamente todas as verificações afetadas.
-5. Só declare a implementação pronta quando as verificações executadas passarem; testes ignorados ou não executados não contam como aprovação.
+## Verification rule
 
-## Ciclo de code review
+Every implemented feature must have tests that exercise its observable behavior at the relevant public interface.
 
-Depois de implementar e verificar o codigo, execute a skill `code-review` do Matt Pocock contra o ticket, o diff e os padroes do repositorio.
+1. Write or update tests alongside the implementation.
+2. Run the full suite after every code change.
+3. Also run type checking, linting and build when configured.
+4. If any verification fails, diagnose the cause, fix the code or test, and rerun all affected verifications.
+5. Declare the implementation ready only when the executed verifications pass; skipped or unexecuted tests do not count as approval.
 
-1. Registre cada finding da revisao, incluindo gaps de especificacao, riscos e testes ausentes.
-2. Implemente todos os findings acionaveis antes do handoff ou da PR.
-3. Execute novamente os testes e as verificacoes estaticas depois de cada correcao.
-4. Repita o `code-review` sobre o novo diff ate nao haver mais findings acionaveis.
-5. So declare o trabalho pronto quando testes, verificacoes e revisao estiverem sem gaps pendentes.
+## Code review cycle
 
-`code-review` complementa os testes: testes demonstram comportamento executado; a revisao verifica cobertura contra especificacao, padroes e riscos que os testes podem nao detectar.
+After implementing and verifying the code, run the Matt Pocock `code-review` skill against the ticket, diff and repository standards.
 
-## Skills relevantes
+1. Record every review finding, including specification gaps, risks and missing tests.
+2. Implement every actionable finding before handoff or PR.
+3. Rerun tests and static checks after each correction.
+4. Repeat `code-review` on the new diff until there are no actionable findings.
+5. Declare the work ready only when tests, checks and review have no pending gaps.
 
-- `implement`: executar um ticket ou especificação de ponta a ponta.
-- `tdd`: desenvolver features com o ciclo red-green-refactor.
-- `codebase-design`: desenhar interfaces, ports, adapters e seams.
-- `diagnosing-bugs`: reproduzir e corrigir falhas ou regressões.
-- `code-review`: revisar a implementação contra padrões e especificação.
-- `domain-modeling`: alterar linguagem, contexto ou decisões de domínio.
-- `writing-for-agents`: modificar `AGENTS.md` ou outra instrução para agentes.
+`code-review` complements tests: tests demonstrate executed behavior; review checks coverage against the specification, standards and risks that tests may miss.
+
+## Relevant skills
+
+- `implement`: execute a ticket or specification end to end.
+- `tdd`: develop features with the red-green-refactor cycle.
+- `codebase-design`: design interfaces, ports, adapters and seams.
+- `diagnosing-bugs`: reproduce and fix failures or regressions.
+- `code-review`: review implementation against standards and specification.
+- `domain-modeling`: change language, context or domain decisions.
+- `writing-for-agents`: modify `AGENTS.md` or another agent instruction.
 
 ## Repository conventions
 
 ### Issue tracker
 
-Issues deste repositório são rastreadas no GitHub. Veja `docs/agents/issue-tracker.md`.
+Issues in this repository are tracked in GitHub. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
-Usa `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human` e `wontfix`. Veja `docs/agents/triage-labels.md`.
+Use `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human` and `wontfix`. See `docs/agents/triage-labels.md`.
 
 ### Domain docs
 
-Repositório single-context: `CONTEXT.md` na raiz e ADRs em `docs/adr/`. Veja `docs/agents/domain.md`.
+This is a single-context repository: `CONTEXT.md` is at the root and ADRs are in `docs/adr/`. See `docs/agents/domain.md`.
+
+### Adapter and Fake naming
+
+- Use `Adapter` as the suffix for a concrete implementation of a port/interface, especially when it integrates real infrastructure.
+- Use `Fake` as the suffix for deterministic substitutes used in tests, fixtures or local development.
+- Do not use `InMemory` in type or module names; in-memory storage is an implementation detail, while `Adapter` and `Fake` communicate the code's role.
+- When an implementation could fit both roles, prefer `Fake` when it exists for tests/fixtures and reserve `Adapter` for the real integration.

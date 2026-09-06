@@ -1,73 +1,65 @@
 # Incident Investigation Harness
 
-Base local e reproduzível do Incident Investigation Harness. O serviço expõe a
-API de tickets e persiste os registros em PostgreSQL local; worker, MCPs e os
-demais fluxos serão adicionados em etapas posteriores.
+Local, reproducible foundation for the Incident Investigation Harness. The service exposes a ticket API and persists records in local PostgreSQL; the worker, MCPs and other flows are being added incrementally.
 
-## Pré-requisitos
+## Prerequisites
 
-- Python 3.12 ou superior
+- Python 3.12 or newer
 - [uv](https://docs.astral.sh/uv/)
-- Docker Compose v2 (para executar o ambiente em contêiner)
+- Docker Compose v2
 
-## Ciclo local
+## Local development
 
-Instale todas as dependências, incluindo as de desenvolvimento:
+Install all dependencies, including development dependencies:
 
 ```sh
 uv sync
 ```
 
-Execute os testes e a checagem estática:
+Run tests and static checking:
 
 ```sh
 uv run pytest
 uv run mypy
 ```
 
-### Testes de integração
+### Integration tests
 
-O teste `tests/test_postgres_integration.py` verifica que um ticket continua
-disponível depois do reinício da API. Ele precisa de um PostgreSQL acessível e
-da variável `DATABASE_URL` configurada. No PowerShell, usando o ambiente
-virtual local:
+`tests/test_postgres_integration.py` verifies that a ticket remains available after the API process restarts. It requires accessible PostgreSQL and a configured `DATABASE_URL`. In PowerShell, using the local virtual environment:
 
 ```powershell
 $env:DATABASE_URL = "postgresql://ticketing:ticketing@localhost:5432/ticketing"
 .\.venv\Scripts\python.exe -m pytest -m integration
 ```
 
-O exemplo acima pressupõe um PostgreSQL acessível em `localhost:5432`. O
-serviço `db` do Compose não publica essa porta para o host; nesse caso, use um
-PostgreSQL local ou publique a porta antes de executar o teste.
+The example assumes PostgreSQL is available at `localhost:5432`. The Compose `db` service does not publish that port to the host; use a local PostgreSQL instance or publish the port before running the integration test.
 
-Para executar todos os testes com a integração habilitada:
+To run all tests with integration enabled:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest
 ```
 
-Sem `DATABASE_URL`, o teste de integração é marcado como `skipped`; os testes
-rápidos com `InMemoryTicketRepository` continuam sendo executados.
+Without `DATABASE_URL`, the integration test is marked `skipped`; the fast tests using `TicketRepositoryFake` still run.
 
-## Ambiente com Docker Compose
+## Docker Compose environment
 
-Suba a API e o PostgreSQL local:
+Start the local API and PostgreSQL:
 
 ```sh
 docker compose up --build -d
 ```
 
-Confirme a disponibilidade pelo healthcheck do Compose ou pelos endpoints:
+Check availability through the Compose healthcheck or endpoints:
 
 ```sh
 docker compose ps
 curl http://localhost:8000/health
 ```
 
-O serviço deve ficar `healthy` e o endpoint deve responder `{"status":"ok"}`.
+The service should be `healthy` and the endpoint should return `{"status":"ok"}`.
 
-Crie e consulte um ticket:
+Create and query a ticket:
 
 ```sh
 curl -X POST http://localhost:8000/tickets \
@@ -76,18 +68,16 @@ curl -X POST http://localhost:8000/tickets \
 curl http://localhost:8000/tickets/{ticket-id}
 ```
 
-Solicite a notificação do ticket. O pedido usa o `requester_email`, começa com
-status `pending` e é publicado na lista Redis `notification_requests`:
+Request a ticket notification. The request uses `requester_email`, starts with `pending` status and is published to the Redis `notification_requests` list:
 
 ```sh
 curl -X POST http://localhost:8000/tickets/{ticket-id}/notifications
 curl http://localhost:8000/notification-requests/{request-id}
 ```
 
-Os tickets ficam no volume Docker `ticketing-data` e continuam disponíveis após
-reiniciar o processo da API.
+Tickets live in the Docker `ticketing-data` volume and remain available after restarting the API process.
 
-Para encerrar o ambiente:
+To stop the environment:
 
 ```sh
 docker compose down

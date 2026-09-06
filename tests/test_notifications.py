@@ -18,16 +18,16 @@ from incident_investigation_harness.notifications import (
     NotificationWorker,
 )
 from tests.fakes import (
-    InMemoryNotificationQueue,
-    InMemoryNotificationRequestRepository,
-    InMemoryTicketRepository,
+    NotificationQueueFake,
+    NotificationRequestRepositoryFake,
+    TicketRepositoryFake,
 )
 
 
 def test_existing_ticket_creates_persisted_notification_request_and_queue_message() -> None:
-    ticket_repository = InMemoryTicketRepository()
-    notification_repository = InMemoryNotificationRequestRepository()
-    queue = InMemoryNotificationQueue()
+    ticket_repository = TicketRepositoryFake()
+    notification_repository = NotificationRequestRepositoryFake()
+    queue = NotificationQueueFake()
     app.state.ticket_repository = ticket_repository
     app.state.notification_request_repository = notification_repository
     app.state.notification_queue = queue
@@ -47,9 +47,9 @@ def test_existing_ticket_creates_persisted_notification_request_and_queue_messag
 
 
 def test_missing_ticket_does_not_create_or_publish_notification_request() -> None:
-    app.state.ticket_repository = InMemoryTicketRepository()
-    app.state.notification_request_repository = InMemoryNotificationRequestRepository()
-    app.state.notification_queue = InMemoryNotificationQueue()
+    app.state.ticket_repository = TicketRepositoryFake()
+    app.state.notification_request_repository = NotificationRequestRepositoryFake()
+    app.state.notification_queue = NotificationQueueFake()
     missing_ticket_id = uuid.uuid4()
 
     response, message = asyncio.run(_request_for_missing_ticket(missing_ticket_id))
@@ -59,9 +59,9 @@ def test_missing_ticket_does_not_create_or_publish_notification_request() -> Non
 
 
 def test_worker_delivers_request_and_reprocessing_does_not_duplicate_delivery() -> None:
-    ticket_repository = InMemoryTicketRepository()
-    notification_repository = InMemoryNotificationRequestRepository()
-    queue = InMemoryNotificationQueue()
+    ticket_repository = TicketRepositoryFake()
+    notification_repository = NotificationRequestRepositoryFake()
+    queue = NotificationQueueFake()
     provider = LocalNotificationProvider()
     app.state.ticket_repository = ticket_repository
     app.state.notification_request_repository = notification_repository
@@ -88,9 +88,9 @@ def test_worker_delivers_request_and_reprocessing_does_not_duplicate_delivery() 
 
 
 def test_worker_does_not_mark_rate_limited_request_as_delivered() -> None:
-    ticket_repository = InMemoryTicketRepository()
-    notification_repository = InMemoryNotificationRequestRepository()
-    queue = InMemoryNotificationQueue()
+    ticket_repository = TicketRepositoryFake()
+    notification_repository = NotificationRequestRepositoryFake()
+    queue = NotificationQueueFake()
     provider = LocalNotificationProvider()
     provider.configure_fault_profile(ProviderFaultProfile(rate_limit_attempts=1))
     app.state.ticket_repository = ticket_repository
@@ -119,8 +119,8 @@ def test_worker_stops_when_stop_requested() -> None:
     stop_event = asyncio.Event()
     stop_event.set()
     worker = NotificationWorker(
-        InMemoryNotificationRequestRepository(),
-        InMemoryNotificationQueue(),
+        NotificationRequestRepositoryFake(),
+        NotificationQueueFake(),
         LocalNotificationProvider(),
     )
 

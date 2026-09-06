@@ -1,90 +1,88 @@
 # Incident Investigation Harness for Codex
 
-## Objetivo
+## Objective
 
-Demonstrar AI Engineering de ponta a ponta com um ambiente local e reproduzível no qual o Codex investiga incidentes de um Ticketing SaaS simulado. O sistema produz recomendações auditáveis; não executa mitigação no MVP.
+Demonstrate end-to-end AI Engineering with a local, reproducible environment in which Codex investigates incidents in a simulated Ticketing SaaS. The system produces auditable recommendations; the MVP does not execute mitigation.
 
-## Problema
+## Problem
 
-Em incidentes, evidências ficam espalhadas entre tickets, logs, traces, métricas, runbooks e código. O harness fornece ao Codex fontes limitadas por privilégio e exige um relatório fundamentado, permitindo avaliar qualidade, segurança e operação de modo repetível.
+Incident evidence is scattered across tickets, logs, traces, metrics, runbooks and code. The harness gives Codex privilege-limited sources and requires an evidence-based report, making quality, security and operations repeatable to evaluate.
 
-## Princípios decididos
+## Decided principles
 
-- Codex é o harness; não construímos um chat agent próprio.
-- Todo o ambiente do produto é local, executado por Docker Compose.
-- O Codex CLI executa os evals; o aplicativo desktop serve para desenvolvimento e dogfooding.
-- Cada execução avaliada usa um workspace isolado do agente; código, evidências e oráculos ficam fora dele e só código/evidências chegam por MCPs read-only.
-- O MVP é read-only: diagnostica e recomenda, mas não aplica mudanças nem ações operacionais.
-- Evidência operacional é não confiável e não pode alterar instruções ou permissões do agente.
-- O relatório só passa se cada afirmação factual relevante tiver Evidence Citations verificáveis.
-- O Incident Oracle fica inacessível ao Codex durante a investigação.
-- O Quality Gate determinístico é a autoridade do MVP.
+- Codex is the harness; we do not build a separate chat agent.
+- The entire product environment runs locally through Docker Compose.
+- Codex CLI runs evaluations; the desktop application is for development and dogfooding.
+- Each evaluated run uses an isolated agent workspace. Code, evidence and oracles stay outside it; only code and evidence enter through read-only MCPs.
+- The MVP is read-only: it investigates and recommends, but does not apply changes or operational actions.
+- Operational evidence is untrusted and cannot change the agent's instructions or permissions.
+- A report passes only when each relevant factual claim has verifiable Evidence Citations.
+- The Incident Oracle is inaccessible to Codex during investigation.
+- The deterministic Quality Gate is the MVP authority.
 
-## Fluxo de uma investigação
+## Investigation flow
 
 ```text
-Ticket de incidente
-  -> Codex CLI + skill de investigação
+Incident ticket
+  -> Codex CLI + investigation skill
   -> incident-mcp | operations-mcp | knowledge-mcp | source-mcp
-  -> Investigation Report estruturado, com citations
-  -> Quality Gate determinístico contra Incident Oracle
-  -> resultados, eventos e métricas no stack de observabilidade local
+  -> Structured Investigation Report with citations
+  -> Deterministic Quality Gate against the Incident Oracle
+  -> Results, events and metrics in the local observability stack
 ```
 
-## Sistema sob investigação
+## System under investigation
 
-O Ticketing SaaS recebe tickets e envia notificações assíncronas. Seus componentes iniciais são:
+The Ticketing SaaS receives tickets and sends asynchronous notifications. Its initial components are:
 
-- `ticket-api`: FastAPI + Pydantic para criar tickets e pedidos de notificação.
-- `notification-worker`: worker Python assíncrono que consome a fila.
-- PostgreSQL: tickets e estado operacional.
-- Redis: fila e backlog.
-- `notification-provider`: dependência local que pode devolver `429` de modo controlado.
+- `ticket-api`: FastAPI + Pydantic API for creating tickets and notification requests.
+- `notification-worker`: asynchronous Python worker that consumes the queue.
+- PostgreSQL: tickets and operational state.
+- Redis: queue and backlog.
+- `notification-provider`: local dependency that can return controlled `429` responses.
 
-Um injetor de falhas e gerador de tráfego criam incidentes de forma determinística.
+A failure injector and traffic generator create deterministic incidents.
 
-## MVP: primeiro corte vertical
+## MVP: first vertical slice
 
-### Cenário principal
+### Main scenario
 
-Uma dependência de notificações devolve `429`. O worker faz retries sem backoff, limite ou jitter adequados. A pressão amplifica o erro, aumenta a fila e degrada a latência p99.
+A notification dependency returns `429`. The worker retries without adequate backoff, limits or jitter. The pressure amplifies the error, increases the queue and degrades p99 latency.
 
 ### Evidence Providers via MCP
 
-- `incident-mcp`: ticket, comentários e linha do tempo.
-- `operations-mcp`: logs, métricas e traces; somente leitura.
-- `knowledge-mcp`: runbooks e ADRs relevantes.
-- `source-mcp`: código, diff e histórico Git.
+- `incident-mcp`: ticket, comments and timeline.
+- `operations-mcp`: logs, metrics and traces; read-only.
+- `knowledge-mcp`: relevant runbooks and ADRs.
+- `source-mcp`: code, diff and Git history.
 
-### Relatório obrigatório
+### Required report
 
-O Investigation Report contém impacto, timeline baseada em evidências, hipóteses, causa mais provável, confiança, mitigação sugerida, lacunas de evidência e Evidence Citations.
+The Investigation Report contains impact, an evidence-based timeline, hypotheses, probable cause, confidence, suggested mitigation, evidence gaps and Evidence Citations.
 
-### Evals mínimos
+### Minimum evaluations
 
-1. Retry Storm com evidência suficiente: diagnosticar e recomendar controles de retry.
-2. Evidência ambígua: declarar incerteza calibrada e pedir a próxima evidência relevante.
-3. Prompt injection no ticket: ignorar a instrução maliciosa e manter a investigação segura.
+1. Sufficient-evidence Retry Storm: diagnose it and recommend retry controls.
+2. Ambiguous evidence: state calibrated uncertainty and request the next relevant evidence.
+3. Prompt injection in the ticket: ignore the malicious instruction and keep the investigation safe.
 
-## Tecnologia do núcleo
+## Core technology
 
-- Python com `uv`, Pydantic, `pytest`, `asyncio` e type checking.
-- Monorepo modular com um único `pyproject.toml`; API, worker, MCPs, simulador e runner têm módulos e entry points próprios.
-- Codex CLI com execução em sandbox de somente leitura, JSONL de eventos e schema de saída para o relatório.
-- OpenTelemetry + Collector + Jaeger para traces; Prometheus + Grafana para métricas e dashboards.
-- Docker Compose para reproduzir a aplicação, os MCPs, o stack de observabilidade e as fixtures.
+- Python with `uv`, Pydantic, `pytest`, `asyncio` and type checking.
+- Modular monorepo with one `pyproject.toml`; API, worker, MCPs, simulator and runner have separate modules and entry points.
+- Codex CLI in a read-only sandbox, with JSONL event output and a structured report schema.
+- OpenTelemetry + Collector + Jaeger for traces; Prometheus + Grafana for metrics and dashboards.
+- Docker Compose for the application, MCPs, observability stack and fixtures.
 
-Cada Investigation Run recebe `incident_id` e `investigation_run_id`, propagados pelos MCPs, logs, spans e relatório.
+Each Investigation Run receives `incident_id` and `investigation_run_id`, which are propagated through MCPs, logs, spans and the report. The Codex adapter also injects them into the effective investigation context, allowing bounded MCP queries without requiring the investigator to discover opaque UUIDs.
 
-## Crescimento planejado após o MVP
+## Planned growth after the MVP
 
-1. Retrieval avançado no `knowledge-mcp`: embeddings, chunking, busca híbrida, reranking e métricas recall@k.
-2. Context engineering: memória recuperada, cache de instruções e compaction de investigações longas.
-3. Mais cenários: poison message, configuração/cache inválido, índice de retrieval desatualizado e falhas de dependência.
-4. Avaliação ampliada: regressão, mutation tests e LLM-as-a-judge somente como métrica complementar.
-5. Modo de ação aprovado por humano, com ferramentas separadas, reversíveis e auditadas.
-6. UI para abrir incidentes e comparar Investigation Runs, somente quando os fluxos estiverem estáveis.
+1. Advanced retrieval in `knowledge-mcp`: embeddings, chunking, hybrid search, reranking and recall@k metrics.
+2. Context engineering: retrieved memory, instruction caching and compaction for long investigations.
+3. More scenarios: poison message, invalid configuration/cache, stale retrieval index and dependency failures.
+4. Broader evaluation: regression tests, mutation tests and LLM-as-a-judge only as a complementary metric.
+5. Human-approved action mode with separate, reversible and audited tools.
+6. UI for opening incidents and comparing Investigation Runs, only after flows stabilize.
 
-## O que o projeto prova em entrevistas
-
-MCP e tool use, agentes e skills, retrieval, context engineering, evals determinísticos, guardrails contra prompt injection, observabilidade de agentes, qualidade operacional, resiliência e Python de produção — em vez de uma demonstração isolada de chat com documentos.
+The project demonstrates MCP and tool use, agents and skills, retrieval, context engineering, deterministic evaluations, prompt-injection guardrails, agent observability, operational quality, resilience and production Python instead of an isolated document-chat demo.

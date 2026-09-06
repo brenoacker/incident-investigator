@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 import pytest
 
 from incident_investigation_harness.adapters.incident_evidence import (
-    InMemoryIncidentEvidenceRepository,
+    IncidentEvidenceRepositoryFake,
 )
 from incident_investigation_harness.context import InvestigationContext
 from incident_investigation_harness.evidence import (
@@ -38,7 +38,7 @@ def test_incident_evidence_contract_is_scoped_cited_and_read_only() -> None:
         description="Notification latency increased.",
         occurred_at=datetime(2026, 1, 1, 1, tzinfo=timezone.utc),
     )
-    repository = InMemoryIncidentEvidenceRepository(
+    repository = IncidentEvidenceRepositoryFake(
         tickets=[first_ticket, second_ticket],
         comments=[first_comment],
         timeline=[first_event],

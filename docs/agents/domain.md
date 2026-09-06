@@ -1,18 +1,18 @@
-# Domain Docs
+# Domain documentation
 
-Como as engineering skills devem consumir a documentação de domínio deste repositório.
+How engineering skills should consume this repository's domain documentation.
 
-## Antes de explorar
+## Before exploring
 
-- Leia `CONTEXT.md` na raiz.
-- Se existir `CONTEXT-MAP.md`, use-o para localizar os contextos relevantes.
-- Leia ADRs em `docs/adr/` que afetem a área em questão.
+- Read `CONTEXT.md` at the root.
+- If `CONTEXT-MAP.md` exists, use it to locate relevant contexts.
+- Read ADRs in `docs/adr/` that affect the area in question.
 
-Se um desses arquivos ainda não existir, prossiga sem apontar sua ausência. O glossário e ADRs são criados apenas quando houver uma decisão de domínio ou arquitetura a registrar.
+If one of these files does not exist, continue without calling out its absence. Create the glossary and ADRs only when there is a domain or architectural decision to record.
 
 ## Layout
 
-Este é um repositório single-context:
+This is a single-context repository:
 
 ```text
 /
@@ -21,12 +21,12 @@ Este é um repositório single-context:
 └── src/
 ```
 
-## Vocabulário
+## Vocabulary
 
-Use os termos definidos em `CONTEXT.md` em issues, propostas, hipóteses e nomes de testes. Não troque termos por sinônimos que o glossário evita.
+Use the terms defined in `CONTEXT.md` in issues, proposals, hypotheses and test names. Do not replace terms with synonyms that the glossary avoids.
 
-Se um conceito necessário não estiver no glossário, trate isso como uma possível lacuna a ser resolvida antes de inventar terminologia.
+If a necessary concept is not in the glossary, treat it as a possible gap to resolve before inventing terminology.
 
 ## ADRs
 
-Se uma proposta contradisser um ADR existente, sinalize explicitamente o conflito em vez de substituí-lo silenciosamente.
+If a proposal conflicts with an existing ADR, explicitly flag the conflict instead of silently replacing it.

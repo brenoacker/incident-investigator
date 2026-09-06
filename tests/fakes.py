@@ -3,14 +3,14 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from incident_investigation_harness.adapters.in_memory import (
-    InMemoryNotificationQueue,
-    InMemoryNotificationRequestRepository,
+from incident_investigation_harness.adapters.fakes import (
+    NotificationQueueFake,
+    NotificationRequestRepositoryFake,
 )
 from incident_investigation_harness.tickets import Ticket, TicketCreate
 
 
-class InMemoryTicketRepository:
+class TicketRepositoryFake:
     def __init__(self) -> None:
         self.tickets: dict[uuid.UUID, Ticket] = {}
 

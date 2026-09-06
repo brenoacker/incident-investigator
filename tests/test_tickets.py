@@ -4,11 +4,11 @@ import asyncio
 import httpx
 
 from incident_investigation_harness.app import app
-from tests.fakes import InMemoryTicketRepository
+from tests.fakes import TicketRepositoryFake
 
 
 def test_ticket_api_creates_and_reads_a_ticket() -> None:
-    repository = InMemoryTicketRepository()
+    repository = TicketRepositoryFake()
     app.state.ticket_repository = repository
 
     created, fetched = asyncio.run(_create_and_fetch_ticket())
@@ -21,7 +21,7 @@ def test_ticket_api_creates_and_reads_a_ticket() -> None:
 
 
 def test_ticket_api_rejects_invalid_data_without_creating_a_ticket() -> None:
-    repository = InMemoryTicketRepository()
+    repository = TicketRepositoryFake()
     app.state.ticket_repository = repository
 
     response = asyncio.run(_create_invalid_ticket())
