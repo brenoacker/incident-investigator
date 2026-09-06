@@ -126,14 +126,15 @@ flowchart TD
     Reset --> Fixtures[Apply traffic, failures and fixtures]
     Fixtures --> IDs[Generate incident_id and investigation_run_id]
     IDs --> Workspace[Create isolated Codex workspace]
-    Workspace --> Tools[Authorize read-only MCPs only]
+    Workspace --> Sandbox[Verify effective InvestigationSandbox]
+    Sandbox --> Tools[Authorize allowlisted read-only MCPs only]
     Tools --> Start[Start investigation]
     Start --> Runner[Evaluated Run runner]
     Runner --> Collect[Collect report and JSONL events]
     Collect --> ExternalGate[Evaluate outside investigator]
 ```
 
-During the investigation, Codex does not receive the Incident Oracle, access PostgreSQL or Redis directly, or receive write, simulation, administration or evaluation tools. The Oracle is used only afterward by the separate evaluation process.
+During the investigation, Codex does not receive the Incident Oracle, access PostgreSQL or Redis directly, or receive write, simulation, administration or evaluation tools. The effective sandbox verifies these denials and exposes only its configured `AllowedEvidenceProviders`; the Oracle is used only afterward by the separate evaluation process.
 
 ## 7. Codex investigation with MCPs
 

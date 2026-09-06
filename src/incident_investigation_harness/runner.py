@@ -9,6 +9,11 @@ from typing import Callable, Mapping, Protocol
 from pydantic import BaseModel, ConfigDict, Field
 
 from incident_investigation_harness.context import InvestigationContext
+from incident_investigation_harness.isolation import (
+    InvestigationEnvironment,
+    InvestigationSandbox,
+    IsolationProbeResult,
+)
 from incident_investigation_harness.quality_gate import (
     EvidenceSet,
     IncidentOracle,
@@ -59,7 +64,9 @@ class InvestigatorExecution(BaseModel):
 class InvestigatorAdapter(Protocol):
     """The narrow capability granted to the investigation process."""
 
-    def investigate(self, request: EvaluatedRunRequest) -> InvestigatorExecution: ...
+    def investigate(
+        self, request: EvaluatedRunRequest, environment: InvestigationEnvironment
+    ) -> InvestigatorExecution: ...
 
 
 class ExecutionFailure(BaseModel):
@@ -80,6 +87,7 @@ class EvaluatedRunResult:
     events: tuple[InvestigationEvent, ...]
     quality_gate: QualityGateResult | None
     execution_failure: ExecutionFailure | None
+    isolation_probes: tuple[IsolationProbeResult, ...]
 
     @property
     def approved(self) -> bool:
@@ -111,6 +119,7 @@ class EvaluatedRunRunner:
         evidence_set: EvidenceSet | None = None,
         oracle: IncidentOracle | None = None,
         evidence_set_factory: EvidenceSetFactory | None = None,
+        sandbox: InvestigationSandbox | None = None,
     ) -> None:
         if evidence_set is not None and evidence_set_factory is not None:
             raise ValueError("provide evidence_set or evidence_set_factory, not both")
@@ -118,11 +127,13 @@ class EvaluatedRunRunner:
         self._evidence_set = evidence_set
         self._evidence_set_factory = evidence_set_factory
         self._oracle = oracle or IncidentOracle()
+        self._sandbox = sandbox or InvestigationSandbox()
 
     def run(self, request: EvaluatedRunRequest) -> EvaluatedRunResult:
         """Execute one run; investigator errors are explicit and never evaluated."""
         try:
-            execution = self._investigator.investigate(request)
+            environment = self._sandbox.prepare(request.context)
+            execution = self._investigator.investigate(request, environment)
             events = _validate_events(execution.events, request)
             evidence_set = self._get_evidence_set(request)
             quality_gate = QualityGate.evaluate(
@@ -137,6 +148,7 @@ class EvaluatedRunRunner:
                 execution_failure=ExecutionFailure(
                     error_type=type(error).__name__, message=str(error) or "unknown error"
                 ),
+                isolation_probes=(),
             )
         return EvaluatedRunResult(
             request=request,
@@ -144,6 +156,7 @@ class EvaluatedRunRunner:
             events=events,
             quality_gate=quality_gate,
             execution_failure=None,
+            isolation_probes=environment.isolation_probes,
         )
 
     def _get_evidence_set(self, request: EvaluatedRunRequest) -> EvidenceSet:
