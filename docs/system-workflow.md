@@ -18,7 +18,8 @@ flowchart LR
     Result --> Evidence[Incident evidence]
     Evidence --> MCPs[Evidence Providers via MCP]
     MCPs --> Codex[Codex: Read-Only Investigation]
-    Codex --> Report[Investigation Report]
+    Codex --> Runner[Evaluated Run runner]
+    Runner --> Report[Investigation Report + JSONL events]
     Report --> Gate[Quality Gate]
     Gate --> Verdict[Approved or rejected]
 ```
@@ -45,6 +46,7 @@ The flows connect through evidence and the `incident_id` and `investigation_run_
 | Scenarios and fixtures | Control traffic, failures and evidence for reproducibility | Setup / evaluation |
 | Codex CLI | Runs the investigation in an isolated workspace | Incident Triage |
 | Evidence Providers | Expose bounded evidence to Codex through MCP | Incident Triage |
+| Evaluated Run runner | Composes one identified investigation, collects its artifacts and invokes external evaluation | Incident Triage / Evaluation |
 | Quality Gate | Validates the report without relying on subjective model judgment | Evaluation |
 | Incident Oracle | Stores the private reference and scenario criteria | Evaluation, outside Codex's reach |
 | Local observability | Records events, logs, spans, metrics and results | Audit |
@@ -116,7 +118,7 @@ The healthy scenario acts as the reference. The Quality Gate uses the scenario's
 
 ## 6. Preparing an Investigation Run
 
-An Investigation Run is an identifiable attempt to investigate an incident. For an Evaluated Run, an external runner prepares the scenario and isolation before starting Codex.
+An Investigation Run is an identifiable attempt to investigate an incident. The public `EvaluatedRunRunner.run` boundary accepts an `EvaluatedRunRequest` (scenario and both identifiers), invokes the configured `InvestigatorAdapter`, collects its `InvestigationReport` and scoped JSONL events, and then evaluates them with the external Quality Gate. An investigator failure is returned as an explicit execution failure and is never evaluated as an approval.
 
 ```mermaid
 flowchart TD
@@ -126,6 +128,9 @@ flowchart TD
     IDs --> Workspace[Create isolated Codex workspace]
     Workspace --> Tools[Authorize read-only MCPs only]
     Tools --> Start[Start investigation]
+    Start --> Runner[Evaluated Run runner]
+    Runner --> Collect[Collect report and JSONL events]
+    Collect --> ExternalGate[Evaluate outside investigator]
 ```
 
 During the investigation, Codex does not receive the Incident Oracle, access PostgreSQL or Redis directly, or receive write, simulation, administration or evaluation tools. The Oracle is used only afterward by the separate evaluation process.
@@ -231,7 +236,7 @@ flowchart LR
 
 ## 10. Quality Gate and final result
 
-After Codex finishes, an external process collects the report and run events. The Quality Gate evaluates the result against the schema, run identity, citation membership and citation resolution. It accepts the private Incident Oracle as evaluator-only input; the Oracle is not exposed through investigator tools. Invalid reports receive structured rejection reasons, while a report whose cited factual claims resolve within the matching `EvidenceSet` receives a deterministic approval.
+After Codex finishes, the external runner collects the report and run events. The Quality Gate evaluates the result against the schema, run identity, citation membership and citation resolution. It accepts the private Incident Oracle as evaluator-only input; the Oracle is not exposed through investigator tools. Invalid reports receive structured rejection reasons, while a report whose cited factual claims resolve within the matching `EvidenceSet` receives a deterministic approval. A failed investigator produces an `execution-failure` result with no Quality Gate verdict, so it cannot become an approval.
 
 ```mermaid
 flowchart TD
