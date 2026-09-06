@@ -19,9 +19,11 @@ uv sync
 Run tests and static checking:
 
 ```sh
-uv run pytest
+uv run python -m pytest
 uv run mypy
 ```
+
+The test command measures all production code under `src/incident_investigation_harness` and fails when total coverage is below 90%.
 
 ### Integration tests
 
