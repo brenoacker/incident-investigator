@@ -9,7 +9,14 @@ from pydantic import BaseModel, ConfigDict, Field
 from incident_investigation_harness.context import InvestigationContext
 from incident_investigation_harness.tickets import Ticket
 
-EvidenceType = Literal["ticket", "comment", "timeline"]
+EvidenceType = Literal[
+    "ticket",
+    "comment",
+    "timeline",
+    "operational-log",
+    "operational-metric",
+    "operational-trace",
+]
 
 
 class EvidenceCitation(BaseModel):
@@ -17,7 +24,7 @@ class EvidenceCitation(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    provider: Literal["incident-mcp"]
+    provider: Literal["incident-mcp", "operations-mcp"]
     incident_id: uuid.UUID
     investigation_run_id: uuid.UUID
     evidence_type: EvidenceType

@@ -76,5 +76,17 @@ services:
         "incident_investigation_harness.mcp.incident_mcp"
       ]
 
+  operations-mcp:
+    build:
+      context: .
+    ports:
+      - "8002:8002"
+    command:
+      [
+        "python",
+        "-m",
+        "incident_investigation_harness.mcp.operations_mcp"
+      ]
+
 volumes:
   ticketing-data:
