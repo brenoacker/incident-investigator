@@ -64,5 +64,17 @@ services:
       timeout: 3s
       retries: 5
 
+  incident-mcp:
+    build:
+      context: .
+    ports:
+      - "8001:8001"
+    command:
+      [
+        "python",
+        "-m",
+        "incident_investigation_harness.mcp.incident_mcp"
+      ]
+
 volumes:
   ticketing-data:
