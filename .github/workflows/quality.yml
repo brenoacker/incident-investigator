@@ -14,6 +14,9 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          # source-mcp builds a deterministic diff from HEAD^ to HEAD.
+          fetch-depth: 0
       - name: Install uv
         uses: astral-sh/setup-uv@v6
         with:
