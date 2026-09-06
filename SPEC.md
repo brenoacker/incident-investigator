@@ -68,6 +68,7 @@ O MVP cobre evidência suficiente, evidência ambígua e prompt injection no tic
 Estas escolhas detalham os princípios acima; não representam decisões técnicas já registradas em ADR.
 
 - O runner é a entrada pública de uma Evaluated Run: recebe o cenário e sua configuração, prepara o ambiente isolado, executa o Codex CLI, coleta relatório e eventos e aciona a avaliação em contexto separado do agente. Retorna identificadores, artefatos e resultado de avaliação ou falha de execução explícita.
+- O adapter do Codex deve disponibilizar `incident_id` e `investigation_run_id` no contexto efetivo da investigação (prompt ou mecanismo equivalente), junto com os MCPs autorizados, para que o investigador consulte evidências sem descobrir ou adivinhar identificadores opacos.
 - O isolamento deve restringir visibilidade e capacidades, além de impedir escrita. Uma sandbox read-only, sozinha, não demonstra que o Oracle está inacessível. O processo do agente não recebe montagens, credenciais ou ferramentas que permitam ler o Oracle ou consultar diretamente os serviços subjacentes.
 - O agente acessa apenas os Evidence Providers previstos para investigação. Ferramentas de simulação, escrita, administração e avaliação pertencem ao controle externo da execução e não são expostas ao Codex.
 - Cada resposta de evidência inclui identificação da fonte e referências estáveis suficientes para resolver uma Evidence Citation no conjunto de evidências daquela execução. O relatório não pode fabricar identificadores nem usar referências de outra execução como suporte.

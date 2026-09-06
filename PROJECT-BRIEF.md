@@ -74,7 +74,7 @@ O Investigation Report contém impacto, timeline baseada em evidências, hipóte
 - OpenTelemetry + Collector + Jaeger para traces; Prometheus + Grafana para métricas e dashboards.
 - Docker Compose para reproduzir a aplicação, os MCPs, o stack de observabilidade e as fixtures.
 
-Cada Investigation Run recebe `incident_id` e `investigation_run_id`, propagados pelos MCPs, logs, spans e relatório.
+Cada Investigation Run recebe `incident_id` e `investigation_run_id`, propagados pelos MCPs, logs, spans e relatório. O adapter que invoca o Codex também os injeta no contexto efetivo da investigação, permitindo consultas MCP delimitadas sem exigir que o investigador descubra UUIDs.
 
 ## Crescimento planejado após o MVP
 
