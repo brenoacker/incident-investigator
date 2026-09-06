@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 
 from incident_investigation_harness.adapters.incident_evidence import (
     IncidentEvidenceRepositoryFake,
+)
+from incident_investigation_harness.adapters.knowledge_evidence import (
+    KnowledgeEvidenceAdapter,
 )
 from incident_investigation_harness.context import InvestigationContext
 from incident_investigation_harness.evidence import TimelineEvent, TicketComment
@@ -54,6 +58,19 @@ def build_incident_evidence_repository() -> IncidentEvidenceRepositoryFake:
                 occurred_at=datetime(2026, 1, 1, 0, 10, tzinfo=timezone.utc),
             ),
         ],
+    )
+
+
+def build_knowledge_evidence_repository() -> KnowledgeEvidenceAdapter:
+    """Build the explicit read-only knowledge allowlist for local MCP use."""
+    return KnowledgeEvidenceAdapter.from_allowlist(
+        Path("."),
+        frozenset(
+            {
+                "docs/scenarios/retry-storm-latency.md",
+                "docs/adr/0001-postgresql-for-ticket-persistence.md",
+            }
+        ),
     )
 
 

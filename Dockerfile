@@ -12,6 +12,8 @@ COPY pyproject.toml uv.lock README.md ./
 RUN uv sync --frozen --no-dev --no-install-project
 
 COPY src ./src
+COPY docs/adr/0001-postgresql-for-ticket-persistence.md ./docs/adr/
+COPY docs/scenarios/retry-storm-latency.md ./docs/scenarios/
 RUN uv sync --frozen --no-dev
 
 EXPOSE 8000
