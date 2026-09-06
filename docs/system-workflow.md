@@ -201,6 +201,8 @@ Tickets, comments, logs and retrieved documents are `Untrusted Evidence`: they m
 
 The report turns multiple sources into an auditable explanation. It does not need to use the exact text expected by the Oracle, but it must contain the observable elements required by the scenario.
 
+The versioned Pydantic contract is implemented in `src/incident_investigation_harness/report.py`. It requires run identifiers and all report sections, requires every `FactualClaim` to carry at least one `EvidenceCitation`, and permits `probable_cause` to be absent when the evidence supports Calibrated Uncertainty.
+
 | Report section | Question it answers |
 | --- | --- |
 | Impact | Who or what was affected? |
