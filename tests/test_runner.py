@@ -3,6 +3,10 @@ from __future__ import annotations
 import uuid
 
 from incident_investigation_harness.evidence import EvidenceCitation
+from incident_investigation_harness.isolation import (
+    InvestigationEnvironment,
+    InvestigationSandbox,
+)
 from incident_investigation_harness.quality_gate import EvidenceSet, IncidentOracle
 from incident_investigation_harness.report import (
     Confidence,
@@ -30,8 +34,15 @@ def test_runner_exposes_report_events_and_quality_gate_result_at_public_boundary
     report = _report(request, citation)
 
     class ControlledInvestigator:
-        def investigate(self, received: EvaluatedRunRequest) -> InvestigatorExecution:
+        def investigate(
+            self, received: EvaluatedRunRequest, environment: InvestigationEnvironment
+        ) -> InvestigatorExecution:
             assert received == request
+            assert environment.context == received.context
+            assert environment.allowed_evidence_providers == (
+                "operations-mcp",
+                "source-mcp",
+            )
             return InvestigatorExecution(
                 report=report,
                 events=(
@@ -52,6 +63,9 @@ def test_runner_exposes_report_events_and_quality_gate_result_at_public_boundary
             resolvers=(Resolver(citation),),
         ),
         oracle=IncidentOracle(),
+        sandbox=InvestigationSandbox(
+            allowed_evidence_providers=("operations-mcp", "source-mcp")
+        ),
     ).run(request)
 
     assert result.request == request
@@ -59,12 +73,17 @@ def test_runner_exposes_report_events_and_quality_gate_result_at_public_boundary
     assert result.quality_gate is not None
     assert result.quality_gate.approved
     assert result.execution_failure is None
+    assert result.isolation_probes
+    assert all(not probe.allowed for probe in result.isolation_probes)
     assert '"investigation_run_id":"' in result.events_jsonl
 
 
 def test_investigator_failure_is_not_quality_rejection_or_approval() -> None:
     class FailingInvestigator:
-        def investigate(self, request: EvaluatedRunRequest) -> InvestigatorExecution:
+        def investigate(
+            self, request: EvaluatedRunRequest, environment: InvestigationEnvironment
+        ) -> InvestigatorExecution:
+            del environment
             raise RuntimeError("Codex stopped")
 
     result = EvaluatedRunRunner(FailingInvestigator()).run(_request())
@@ -87,7 +106,10 @@ def test_quality_rejection_is_distinct_from_investigator_failure() -> None:
     )
 
     class ControlledInvestigator:
-        def investigate(self, received: EvaluatedRunRequest) -> InvestigatorExecution:
+        def investigate(
+            self, received: EvaluatedRunRequest, environment: InvestigationEnvironment
+        ) -> InvestigatorExecution:
+            del environment
             return InvestigatorExecution(report=_report(received, citation))
 
     result = EvaluatedRunRunner(
@@ -105,7 +127,10 @@ def test_runner_rejects_events_from_another_run_without_evaluating_report() -> N
     request = _request()
 
     class MisbehavingInvestigator:
-        def investigate(self, received: EvaluatedRunRequest) -> InvestigatorExecution:
+        def investigate(
+            self, received: EvaluatedRunRequest, environment: InvestigationEnvironment
+        ) -> InvestigatorExecution:
+            del environment
             return InvestigatorExecution(
                 report=_report(received),
                 events=(
