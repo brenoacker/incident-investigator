@@ -20,7 +20,7 @@ from incident_investigation_harness.operational_evidence import (
 
 
 @dataclass(frozen=True)
-class InMemoryOperationalEvidenceRepository:
+class OperationalEvidenceRepositoryFake:
     logs: tuple[OperationalLog, ...]
     metrics: tuple[OperationalMetric, ...]
     traces: tuple[OperationalTrace, ...]
@@ -117,11 +117,11 @@ class InMemoryOperationalEvidenceRepository:
         return CitedOperationalTrace(item=item, citation=citation)
 
 
-def build_operational_evidence_repository() -> InMemoryOperationalEvidenceRepository:
+def build_operational_evidence_repository() -> OperationalEvidenceRepositoryFake:
     context = _context("retry-storm", 1)
     other_context = _context("healthy-reference", 1)
     timestamp = datetime(2026, 1, 1, 0, 10, tzinfo=timezone.utc)
-    return InMemoryOperationalEvidenceRepository(
+    return OperationalEvidenceRepositoryFake(
         logs=(
             OperationalLog(
                 id=_id("log-retry-storm-429"),

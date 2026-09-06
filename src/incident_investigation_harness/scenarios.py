@@ -12,9 +12,9 @@ from incident_investigation_harness.adapters.notification_provider import (
     LocalNotificationProvider,
     ProviderFaultProfile,
 )
-from incident_investigation_harness.adapters.in_memory import (
-    InMemoryNotificationQueue,
-    InMemoryNotificationRequestRepository,
+from incident_investigation_harness.adapters.fakes import (
+    NotificationQueueFake,
+    NotificationRequestRepositoryFake,
 )
 from incident_investigation_harness.notifications import (
     NotificationMessage,
@@ -108,8 +108,8 @@ class _Scenario:
         return self._snapshot
 
     async def _run(self) -> OperationalSnapshot:
-        request_repository = InMemoryNotificationRequestRepository()
-        queue = InMemoryNotificationQueue()
+        request_repository = NotificationRequestRepositoryFake()
+        queue = NotificationQueueFake()
         provider = LocalNotificationProvider()
         provider.configure_fault_profile(
             ProviderFaultProfile(rate_limit_attempts=self.rate_limit_attempts)

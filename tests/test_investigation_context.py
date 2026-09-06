@@ -8,13 +8,13 @@ import httpx
 from incident_investigation_harness.adapters.notification_provider import LocalNotificationProvider
 from incident_investigation_harness.app import app
 from incident_investigation_harness.notifications import NotificationWorker
-from tests.fakes import InMemoryNotificationQueue, InMemoryNotificationRequestRepository, InMemoryTicketRepository
+from tests.fakes import NotificationQueueFake, NotificationRequestRepositoryFake, TicketRepositoryFake
 
 
 def test_investigation_run_context_is_propagated_and_queryable() -> None:
-    ticket_repository = InMemoryTicketRepository()
-    request_repository = InMemoryNotificationRequestRepository()
-    queue = InMemoryNotificationQueue()
+    ticket_repository = TicketRepositoryFake()
+    request_repository = NotificationRequestRepositoryFake()
+    queue = NotificationQueueFake()
     app.state.ticket_repository = ticket_repository
     app.state.notification_request_repository = request_repository
     app.state.notification_queue = queue
@@ -31,7 +31,7 @@ def test_investigation_run_context_is_propagated_and_queryable() -> None:
 
 
 def test_ticket_creation_rejects_missing_investigation_context() -> None:
-    app.state.ticket_repository = InMemoryTicketRepository()
+    app.state.ticket_repository = TicketRepositoryFake()
     response = asyncio.run(_post({
         "title": "Missing context", "description": "Context is required",
         "requester_email": "oncall@example.com",

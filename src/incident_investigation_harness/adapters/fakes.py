@@ -14,7 +14,7 @@ from incident_investigation_harness.notifications import (
 )
 
 
-class InMemoryNotificationRequestRepository(NotificationRequestRepository):
+class NotificationRequestRepositoryFake(NotificationRequestRepository):
     """Ephemeral notification state for deterministic local scenario fixtures."""
 
     def __init__(self) -> None:
@@ -61,7 +61,7 @@ class InMemoryNotificationRequestRepository(NotificationRequestRepository):
         return request
 
 
-class InMemoryNotificationQueue(NotificationQueue):
+class NotificationQueueFake(NotificationQueue):
     """Ephemeral FIFO queue for deterministic local scenario fixtures."""
 
     def __init__(self) -> None:

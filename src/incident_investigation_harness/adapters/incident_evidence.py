@@ -19,7 +19,7 @@ from incident_investigation_harness.context import InvestigationContext
 from incident_investigation_harness.tickets import Ticket
 
 
-class InMemoryIncidentEvidenceRepository:
+class IncidentEvidenceRepositoryFake:
     """Read-only evidence source for deterministic provider fixtures."""
 
     def __init__(

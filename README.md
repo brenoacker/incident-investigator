@@ -48,7 +48,7 @@ Para executar todos os testes com a integração habilitada:
 ```
 
 Sem `DATABASE_URL`, o teste de integração é marcado como `skipped`; os testes
-rápidos com `InMemoryTicketRepository` continuam sendo executados.
+rápidos com `TicketRepositoryFake` continuam sendo executados.
 
 ## Ambiente com Docker Compose
 

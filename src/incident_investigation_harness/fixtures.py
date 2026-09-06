@@ -4,21 +4,21 @@ import uuid
 from datetime import datetime, timezone
 
 from incident_investigation_harness.adapters.incident_evidence import (
-    InMemoryIncidentEvidenceRepository,
+    IncidentEvidenceRepositoryFake,
 )
 from incident_investigation_harness.context import InvestigationContext
 from incident_investigation_harness.evidence import TimelineEvent, TicketComment
 from incident_investigation_harness.tickets import Ticket
 
 
-def build_incident_evidence_repository() -> InMemoryIncidentEvidenceRepository:
+def build_incident_evidence_repository() -> IncidentEvidenceRepositoryFake:
     """Build deterministic evidence for local MCP development and evaluation."""
     first_context = _context("retry-storm", 1)
     second_context = _context("healthy-reference", 1)
     first_ticket = _ticket(first_context, "Notification delivery degraded")
     second_ticket = _ticket(second_context, "Notification delivery healthy")
 
-    return InMemoryIncidentEvidenceRepository(
+    return IncidentEvidenceRepositoryFake(
         tickets=[first_ticket, second_ticket],
         comments=[
             TicketComment(
