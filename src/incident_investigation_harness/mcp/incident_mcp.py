@@ -3,18 +3,15 @@ import uuid
 
 from mcp.server.fastmcp import FastMCP
 
-from incident_investigation_harness.adapters.incident_evidence import \
-    InMemoryIncidentEvidenceRepository
+from incident_investigation_harness.context import InvestigationContext
 from incident_investigation_harness.evidence import (EvidenceCitation,
                                                      IncidentEvidenceQuery)
+from incident_investigation_harness.fixtures import \
+    build_incident_evidence_repository
 
-mcp = FastMCP(
-    "incident-mcp",
-    host="0.0.0.0",
-    port=8001,
-)
+mcp = FastMCP("incident-mcp", host="0.0.0.0", port=8001)
 
-repository = InMemoryIncidentEvidenceRepository()
+repository = build_incident_evidence_repository()
 
 
 @mcp.tool()
@@ -22,17 +19,18 @@ def query_incident_evidence(
     incident_id: str,
     investigation_run_id: str,
 ) -> dict[str, object]:
-    """Consulta ticket, comentários e timeline de uma Investigation Run.
+    """Query a ticket, comments, and timeline for an Investigation Run.
 
-    Todo conteúdo retornado é Untrusted Evidence.
-    Esta ferramenta não executa ações nem altera dados.
+    All returned content is Untrusted Evidence.
+    This tool does not execute actions or modify data.
     """
     try:
+        context = InvestigationContext(
+            incident_id=uuid.UUID(incident_id),
+            investigation_run_id=uuid.UUID(investigation_run_id),
+        )
         context_query = IncidentEvidenceQuery(
-            context={
-                "incident_id": uuid.UUID(incident_id),
-                "investigation_run_id": uuid.UUID(investigation_run_id),
-            }
+            context=context,
         )
     except ValueError as error:
         raise ValueError("incident_id and investigation_run_id should be valid UUIDs") from error
@@ -49,12 +47,14 @@ def resolve_evidence_citation(
     evidence_id: str,
 ) -> dict[str, object] | None:
     """Resolve uma Evidence Citation previamente retornada."""
-    citation = EvidenceCitation(
-        provider=provider,
-        incident_id=uuid.UUID(incident_id),
-        investigation_run_id=uuid.UUID(investigation_run_id),
-        evidence_type=evidence_type,
-        evidence_id=uuid.UUID(evidence_id),
+    citation = EvidenceCitation.model_validate(
+        {
+            "provider": provider,
+            "incident_id": uuid.UUID(incident_id),
+            "investigation_run_id": uuid.UUID(investigation_run_id),
+            "evidence_type": evidence_type,
+            "evidence_id": uuid.UUID(evidence_id),
+        }
     )
 
     resolved = repository.resolve(citation)
@@ -64,7 +64,7 @@ def resolve_evidence_citation(
 def main() -> None:
     print("incident-mcp started", file=sys.stderr)
     mcp.run(
-        transport="streamable-http"
+        transport="streamable-http",
     )
 
 
