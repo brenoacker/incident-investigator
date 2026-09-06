@@ -16,6 +16,10 @@ QualityGateReasonCode = Literal[
     "citation-not-in-evidence-set",
     "citation-from-other-run",
     "unresolvable-citation",
+    "scenario-criteria-not-met",
+    "unsupported-factual-claim",
+    "incompatible-conclusion",
+    "incomplete-mitigation",
 ]
 
 
@@ -49,6 +53,116 @@ class IncidentOracle(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
+    version: str = "base-1"
+
+    def evaluate_report(
+        self,
+        report: InvestigationReport,
+        evidence_set: EvidenceSet,
+    ) -> tuple[QualityGateReason, ...]:
+        """Return private scenario reasons; the base oracle has no criteria."""
+        del report, evidence_set
+        return ()
+
+
+class RetryStormOracle(IncidentOracle):
+    """Versioned, evaluator-only criteria for the sufficient Retry Storm case."""
+
+    version: str = "retry-storm-1"
+    required_providers: frozenset[str] = frozenset(
+        {"incident-mcp", "operations-mcp", "knowledge-mcp", "source-mcp"}
+    )
+    required_facts: tuple[str, ...] = ("429", "retry", "backlog", "latency")
+    mitigation_terms: tuple[str, ...] = ("backoff", "attempt", "jitter")
+    incompatible_terms: tuple[str, ...] = (
+        "no retries",
+        "database is the cause",
+        "postgres is the cause",
+        "traffic spike is the cause",
+    )
+
+    def evaluate_report(
+        self,
+        report: InvestigationReport,
+        evidence_set: EvidenceSet,
+    ) -> tuple[QualityGateReason, ...]:
+        reasons: list[QualityGateReason] = []
+        resolved = {
+            citation: evidence_set.resolve(citation)
+            for claim in report.factual_claims
+            for citation in claim.citations
+        }
+        providers = {citation.provider for citation in resolved}
+        missing_providers = self.required_providers - providers
+        if missing_providers:
+            reasons.append(
+                QualityGateReason(
+                    code="scenario-criteria-not-met",
+                    message=(
+                        "report must cite all Evidence Providers; missing: "
+                        + ", ".join(sorted(missing_providers))
+                    ),
+                )
+            )
+
+        for fact in self.required_facts:
+            matching_claims = [
+                claim
+                for claim in report.factual_claims
+                if _fact_matches(fact, claim.statement)
+            ]
+            supported = any(
+                _fact_matches(fact, _evidence_text(resolved[citation]))
+                for claim in matching_claims
+                for citation in claim.citations
+                if resolved[citation] is not None
+            )
+            if not matching_claims or not supported:
+                reasons.append(
+                    QualityGateReason(
+                        code="unsupported-factual-claim",
+                        message=f"Retry Storm fact is missing or unsupported: {fact}",
+                    )
+                )
+
+        probable_cause = report.probable_cause.statement.casefold() if report.probable_cause else ""
+        if any(term in probable_cause for term in self.incompatible_terms):
+            reasons.append(
+                QualityGateReason(
+                    code="incompatible-conclusion",
+                    message="probable cause conflicts with the Retry Storm oracle",
+                )
+            )
+        if not probable_cause or not any(
+            term in probable_cause for term in ("retry", "rate limit", "429")
+        ):
+            reasons.append(
+                QualityGateReason(
+                    code="incompatible-conclusion",
+                    message="probable cause must explain rate limiting and inadequate retries",
+                )
+            )
+
+        mitigation = (
+            report.suggested_mitigation.action + " " + report.suggested_mitigation.rationale
+        ).casefold()
+        missing_terms = [term for term in self.mitigation_terms if term not in mitigation]
+        if missing_terms:
+            reasons.append(
+                QualityGateReason(
+                    code="incomplete-mitigation",
+                    message="mitigation must recommend backoff, an attempt limit and jitter",
+                )
+            )
+        if any(term in mitigation for term in ("execute now", "restart service", "apply change")):
+            reasons.append(
+                QualityGateReason(
+                    code="incomplete-mitigation",
+                    message="mitigation must be a recommendation and must not execute an action",
+                )
+            )
+        return tuple(reasons)
+
 
 class QualityGateReason(BaseModel):
     model_config = ConfigDict(frozen=True)
@@ -80,12 +194,11 @@ class QualityGate:
         oracle: IncidentOracle,
     ) -> QualityGateResult:
         """Evaluate a report without exposing or interpreting the private Oracle."""
-        del oracle
         try:
-            validated_report = (
-                report
+            validated_report = InvestigationReport.model_validate(
+                report.model_dump(mode="json")
                 if isinstance(report, InvestigationReport)
-                else InvestigationReport.model_validate(report)
+                else report
             )
         except ValidationError as error:
             code: QualityGateReasonCode = (
@@ -145,11 +258,8 @@ class QualityGate:
                         )
                     )
 
-        return (
-            _rejected(*reasons)
-            if reasons
-            else QualityGateResult(verdict="approved", reasons=())
-        )
+        reasons.extend(oracle.evaluate_report(validated_report, evidence_set))
+        return _rejected(*reasons) if reasons else QualityGateResult(verdict="approved", reasons=())
 
 
 def _rejected(*reasons: QualityGateReason) -> QualityGateResult:
@@ -162,3 +272,24 @@ def _has_missing_citation(error: ValidationError) -> bool:
         for detail in error.errors()
         for error_location in (detail["loc"],)
     )
+
+
+def _evidence_text(value: object | None) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, BaseModel):
+        return value.model_dump_json().casefold()
+    return str(value).casefold()
+
+
+def _fact_matches(fact: str, text: str) -> bool:
+    normalized = text.casefold()
+    if fact == "429":
+        return "429" in normalized or "rate limit" in normalized or "rate-limited" in normalized
+    if fact == "retry":
+        return any(term in normalized for term in ("retry", "attempt"))
+    if fact == "backlog":
+        return "backlog" in normalized or "queue" in normalized
+    if fact == "latency":
+        return any(term in normalized for term in ("latency", "p99", "degradation"))
+    return fact in normalized
