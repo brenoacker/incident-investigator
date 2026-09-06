@@ -199,9 +199,9 @@ Tickets, comments, logs and retrieved documents are `Untrusted Evidence`: they m
 
 ## 9. Investigation Report structure
 
-The report turns multiple sources into an auditable explanation. It does not need to use the exact text expected by the Oracle, but it must contain the observable elements required by the scenario. The versioned Pydantic contract is implemented in `src/incident_investigation_harness/report.py` and the deterministic validation seam is `QualityGate.evaluate(report, evidence_set, oracle)` in `src/incident_investigation_harness/quality_gate.py`.
+The report turns multiple sources into an auditable explanation. It does not need to use the exact text expected by the Oracle, but it must contain the observable elements required by the scenario.
 
-It requires run identifiers and all report sections, requires every `FactualClaim` to carry at least one `EvidenceCitation`, and permits `probable_cause` to be absent when the evidence supports Calibrated Uncertainty.
+The versioned Pydantic contract is implemented in `src/incident_investigation_harness/report.py`. It requires run identifiers and all report sections, requires every `FactualClaim` to carry at least one `EvidenceCitation`, and permits `probable_cause` to be absent when the evidence supports Calibrated Uncertainty.
 
 | Report section | Question it answers |
 | --- | --- |
@@ -231,7 +231,7 @@ flowchart LR
 
 ## 10. Quality Gate and final result
 
-After Codex finishes, an external process collects the report and run events. The Quality Gate evaluates the result against the schema, run identity, citation membership and citation resolution. It accepts the private Incident Oracle as evaluator-only input; the Oracle is not exposed through investigator tools. Invalid reports receive structured rejection reasons, while a report whose cited factual claims resolve within the matching `EvidenceSet` receives a deterministic approval.
+After Codex finishes, an external process collects the report and run events. The Quality Gate evaluates the result against the schema, run identity, citation resolution and the private Incident Oracle criteria.
 
 ```mermaid
 flowchart TD
