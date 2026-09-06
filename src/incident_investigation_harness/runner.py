@@ -61,6 +61,14 @@ class InvestigatorExecution(BaseModel):
     events: tuple[InvestigationEvent, ...] = ()
 
 
+class InvestigatorExecutionFailure(RuntimeError):
+    """An investigator failure that still has scoped audit events to preserve."""
+
+    def __init__(self, message: str, events: tuple[InvestigationEvent, ...] = ()) -> None:
+        super().__init__(message)
+        self.events = events
+
+
 class InvestigatorAdapter(Protocol):
     """The narrow capability granted to the investigation process."""
 
@@ -138,6 +146,21 @@ class EvaluatedRunRunner:
             evidence_set = self._get_evidence_set(request)
             quality_gate = QualityGate.evaluate(
                 execution.report, evidence_set, self._oracle
+            )
+        except InvestigatorExecutionFailure as error:
+            try:
+                events = _validate_events(error.events, request)
+            except ValueError:
+                events = ()
+            return EvaluatedRunResult(
+                request=request,
+                report=None,
+                events=events,
+                quality_gate=None,
+                execution_failure=ExecutionFailure(
+                    error_type=type(error).__name__, message=str(error) or "unknown error"
+                ),
+                isolation_probes=(),
             )
         except Exception as error:  # boundary converts adapter failures to a result
             return EvaluatedRunResult(

@@ -25,6 +25,10 @@ uv run mypy
 
 The test command measures all production code under `src/incident_investigation_harness` and fails when total coverage is below 90%.
 
+To demonstrate the real Codex path against the Compose `incident-mcp`, authenticate Codex,
+start the MCP service, and run `RUN_CODEX_INTEGRATION=1 uv run pytest tests/test_codex_real.py -m integration`.
+The test is opt-in because it requires Codex credentials and a live MCP endpoint.
+
 ### Integration tests
 
 `tests/test_postgres_integration.py` verifies that a ticket remains available after the API process restarts. It requires accessible PostgreSQL and a configured `DATABASE_URL`. In PowerShell, using the local virtual environment:
