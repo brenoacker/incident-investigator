@@ -1,13 +1,13 @@
-# Triage Labels
+# Triage labels
 
-As skills usam cinco papéis canônicos de triagem. Esta tabela os mapeia para os labels deste repositório.
+The skills use five canonical triage roles. This table maps them to this repository's labels.
 
-| Papel canônico | Label no repositório | Significado |
+| Canonical role | Repository label | Meaning |
 | --- | --- | --- |
-| `needs-triage` | `needs-triage` | A issue precisa de avaliação do mantenedor. |
-| `needs-info` | `needs-info` | Aguarda mais informações de quem reportou. |
-| `ready-for-agent` | `ready-for-agent` | Está especificada e pronta para um agente executar sem contexto humano adicional. |
-| `ready-for-human` | `ready-for-human` | Requer implementação humana. |
-| `wontfix` | `wontfix` | Não será executada. |
+| `needs-triage` | `needs-triage` | The issue needs maintainer evaluation. |
+| `needs-info` | `needs-info` | Waiting for more information from the reporter. |
+| `ready-for-agent` | `ready-for-agent` | Specified and ready for an agent to execute without additional human context. |
+| `ready-for-human` | `ready-for-human` | Requires human implementation. |
+| `wontfix` | `wontfix` | Will not be implemented. |
 
-Quando uma skill mencionar um papel, use o label correspondente da tabela.
+When a skill mentions a role, use the corresponding label from this table.

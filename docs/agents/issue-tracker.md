@@ -1,16 +1,16 @@
 # Issue tracker: GitHub
 
-Issues e PRDs deste repositório vivem no GitHub Issues. Use a CLI `gh` para todas as operações.
+Issues and PRDs for this repository live in GitHub Issues. Use the `gh` CLI for all operations.
 
-## Convenções
+## Conventions
 
-- **Criar issue**: `gh issue create --title "..." --body "..."`.
-- **Ler issue**: `gh issue view <number> --comments`, incluindo labels.
-- **Listar issues**: `gh issue list` com os filtros de estado e label apropriados.
-- **Comentar**: `gh issue comment <number> --body "..."`.
-- **Aplicar ou remover labels**: `gh issue edit <number> --add-label "..."` ou `--remove-label "..."`.
-- **Fechar**: `gh issue close <number> --comment "..."`.
+- **Create an issue**: `gh issue create --title "..." --body "..."`.
+- **Read an issue**: `gh issue view <number> --comments`, including labels.
+- **List issues**: `gh issue list` with the appropriate state and label filters.
+- **Comment**: `gh issue comment <number> --body "..."`.
+- **Add or remove labels**: `gh issue edit <number> --add-label "..."` or `--remove-label "..."`.
+- **Close**: `gh issue close <number> --comment "..."`.
 
-Infira o repositório a partir de `git remote -v`; dentro do clone, a CLI `gh` faz isso automaticamente.
+Infer the repository from `git remote -v`; inside the clone, the `gh` CLI does this automatically.
 
-Quando uma skill disser para publicar no issue tracker, crie uma GitHub Issue. Quando disser para buscar a issue relevante, use `gh issue view <number> --comments`.
+When a skill says to publish to the issue tracker, create a GitHub Issue. When it says to find the relevant issue, use `gh issue view <number> --comments`.

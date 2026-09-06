@@ -1,3 +1,3 @@
-# PostgreSQL para persistência de tickets
+# PostgreSQL for ticket persistence
 
-O Ticketing SaaS usará PostgreSQL como fonte persistente dos tickets desde o primeiro fluxo de negócio. A escolha mantém o ambiente local alinhado à arquitetura do MVP, permite recuperar tickets após reinícios do processo e evita uma migração de armazenamento entre os primeiros tickets; o banco será executado como serviço local no Docker Compose.
+The Ticketing SaaS will use PostgreSQL as the persistent source for tickets from the first business flow. This keeps the local environment aligned with the MVP architecture, allows tickets to survive process restarts and avoids a storage migration during the first ticket flows. The database runs as a local Docker Compose service.
