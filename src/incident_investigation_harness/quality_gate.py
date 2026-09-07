@@ -171,21 +171,15 @@ class AmbiguousEvidenceOracle(IncidentOracle):
     required_confidence: Literal["low"] = "low"
     minimum_hypotheses: int = 2
     relevant_gap_terms: tuple[str, ...] = (
-        "provider",
         "retry",
-        "queue",
         "worker",
-        "log",
-        "metric",
-        "trace",
+        "source",
+        "code",
+        "knowledge",
     )
     alternative_terms: tuple[str, ...] = (
         "alternative",
         "plausible",
-        "possible",
-        "may",
-        "might",
-        "could",
     )
 
     def evaluate_report(

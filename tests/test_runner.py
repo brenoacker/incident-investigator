@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+import subprocess
 import uuid
 
+from incident_investigation_harness.adapters.codex import CodexInvestigatorAdapter
 from incident_investigation_harness.evidence import EvidenceCitation
 from incident_investigation_harness.fixtures import AmbiguousEvidenceFixture
 from incident_investigation_harness.isolation import (
@@ -180,6 +184,70 @@ def test_runner_approves_an_ambiguous_run_with_calibrated_uncertainty() -> None:
     assert result.report is not None
     assert result.report.probable_cause is None
     assert result.execution_failure is None
+
+
+def test_runner_executes_ambiguous_report_through_codex_adapter() -> None:
+    request = _request(scenario=ScenarioName.AMBIGUOUS_EVIDENCE)
+    fixture = AmbiguousEvidenceFixture.for_request(request)
+    captured: dict[str, object] = {}
+    citation = next(iter(fixture.citations))
+    report = InvestigationReport(
+        schema_version="1.0",
+        incident_id=request.incident_id,
+        investigation_run_id=request.investigation_run_id,
+        impact="Some notifications were delayed.",
+        timeline=(),
+        factual_claims=(FactualClaim(
+            id="claim-1", statement="The provider returned a rate-limit response.", citations=(citation,)
+        ),),
+        hypotheses=(
+            {"statement": "A dependency rate limit may be involved."},
+            {"statement": "Queue contention is a plausible alternative."},
+        ),
+        confidence={"level": "low", "rationale": "The evidence is insufficient."},
+        suggested_mitigation={"action": "Collect provider response logs.", "rationale": "They are relevant."},
+        evidence_gaps=({"description": "Retry behavior is unknown.", "needed_evidence": "Worker retry logs"},),
+    )
+
+    def controlled_cli(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        captured["command"] = command
+        output_path = Path(command[command.index("--output-last-message") + 1])
+        output_path.write_text(json.dumps(report.model_dump(mode="json")), encoding="utf-8")
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=json.dumps({
+                "type": "mcp_tool_call",
+                "server": citation.provider,
+                "arguments": {
+                    "incident_id": str(request.incident_id),
+                    "investigation_run_id": str(request.investigation_run_id),
+                },
+            }),
+            stderr="",
+        )
+
+    result = EvaluatedRunRunner(
+        CodexInvestigatorAdapter(
+            {
+                "incident-mcp": "http://incident.test/mcp",
+                "operations-mcp": "http://operations.test/mcp",
+                "knowledge-mcp": "http://knowledge.test/mcp",
+            },
+            command_runner=controlled_cli,
+        ),
+        evidence_set_factory=lambda run: AmbiguousEvidenceFixture.for_request(
+            run
+        ).evidence_set,
+    ).run(request)
+
+    command = captured["command"]
+    assert result.approved
+    assert isinstance(command, list)
+    assert "--sandbox" in command and "read-only" in command
+    assert any("mcp_servers.incident-mcp" in item for item in command)
+    assert any("mcp_servers.operations-mcp" in item for item in command)
+    assert all("knowledge-mcp" not in item and "source-mcp" not in item for item in command)
 
 
 def test_runner_rejects_events_from_another_run_without_evaluating_report() -> None:
