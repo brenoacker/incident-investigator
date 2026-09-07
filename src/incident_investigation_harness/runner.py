@@ -347,8 +347,12 @@ def _report_artifact(
 def _evidence_artifact(
     context: InvestigationContext, evidence_set: EvidenceSet
 ) -> RunArtifact:
+    citations = sorted(
+        evidence_set.citations,
+        key=lambda citation: (citation.provider, str(citation.evidence_id)),
+    )
     return RunArtifact(
         artifact_type="evidence",
         context=context,
-        payload={"citations": tuple(citation.model_dump(mode="json") for citation in evidence_set.citations)},
+        payload={"citations": tuple(citation.model_dump(mode="json") for citation in citations)},
     )

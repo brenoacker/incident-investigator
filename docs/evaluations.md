@@ -4,6 +4,21 @@ This document explains the complete execution path for the three minimum live ev
 
 The evaluations are not LLM-as-a-judge. Codex is the investigator that produces an `InvestigationReport`; the final verdict is produced by deterministic Python code in the `QualityGate`.
 
+## Versioned deterministic corpus
+
+The corpus in [`corpus.py`](../src/incident_investigation_harness/corpus.py) is
+versioned independently from the report schema. Version `1.0` describes the three
+investigation modes, stable fixture identities, authorized evidence providers and
+private oracle versions. `CorpusRunner` executes cases through `EvaluatedRunRunner.run`.
+
+The initial cases cover an approved report, unsupported claims, invalid citations,
+incompatible conclusions under Calibrated Uncertainty, and investigator execution
+failures. Results record corpus, scenario, fixture and investigator versions plus both
+run identifiers, and can persist `report.json`, `events.jsonl` and `result.json`.
+The Incident Oracle is evaluator-only and is never serialized into investigator
+artifacts. Fixture citations derive from the run identity and evidence artifacts are
+sorted, so unchanged deterministic cases can be compared across executions.
+
 ## At a glance
 
 ```mermaid
