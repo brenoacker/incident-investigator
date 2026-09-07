@@ -11,6 +11,7 @@ from incident_investigation_harness.quality_gate import (
     IncidentOracle,
     QualityGate,
     QualityGateReasonCode,
+    RetryStormOracle,
 )
 from incident_investigation_harness.report import (
     Confidence,
@@ -123,6 +124,44 @@ def test_quality_gate_rejects_a_citation_that_cannot_be_resolved() -> None:
     assert _codes(result) == ["unresolvable-citation"]
 
 
+def test_retry_storm_oracle_approves_a_complete_founded_report() -> None:
+    context = _context("retry-storm")
+    fixture = _retry_storm_fixture(context)
+    report = _retry_storm_report(context, fixture)
+
+    result = QualityGate.evaluate(report, fixture, RetryStormOracle())
+
+    assert result.approved
+
+
+def test_retry_storm_oracle_rejects_unsupported_fact_and_incompatible_conclusion() -> None:
+    context = _context("retry-storm")
+    fixture = _retry_storm_fixture(context)
+    report = _retry_storm_report(context, fixture).model_copy(
+        update={
+            "factual_claims": (),
+            "probable_cause": Hypothesis(statement="The database is the cause."),
+        }
+    )
+
+    result = QualityGate.evaluate(report, fixture, RetryStormOracle())
+
+    assert "unsupported-factual-claim" in _codes(result)
+    assert "incompatible-conclusion" in _codes(result)
+
+
+def test_retry_storm_oracle_rejects_mitigation_without_backoff_limit_and_jitter() -> None:
+    context = _context("retry-storm")
+    fixture = _retry_storm_fixture(context)
+    report = _retry_storm_report(context, fixture).model_copy(
+        update={"suggested_mitigation": {"action": "Investigate", "rationale": "Collect more evidence."}}
+    )
+
+    result = QualityGate.evaluate(report, fixture, RetryStormOracle())
+
+    assert _codes(result) == ["incomplete-mitigation"]
+
+
 def _report(
     context: InvestigationContext, citation: EvidenceCitation | None
 ) -> InvestigationReport:
@@ -160,10 +199,14 @@ def _context(run: str) -> InvestigationContext:
 
 def _citation(context: InvestigationContext, value: str) -> EvidenceCitation:
     return EvidenceCitation(
-        provider="operations-mcp",
+        provider=(
+            value
+            if value in {"incident-mcp", "operations-mcp", "knowledge-mcp", "source-mcp"}
+            else "operations-mcp"
+        ),
         incident_id=context.incident_id,
         investigation_run_id=context.investigation_run_id,
-        evidence_type="operational-log",
+            evidence_type=("ticket" if value == "incident-mcp" else "knowledge-document" if value == "knowledge-mcp" else "source-code" if value == "source-mcp" else "operational-log"),
         evidence_id=uuid.uuid5(uuid.NAMESPACE_URL, f"quality-gate-{value}"),
     )
 
@@ -173,8 +216,70 @@ def _codes(result: object) -> list[str]:
 
 
 class Resolver:
-    def __init__(self, citations: set[EvidenceCitation] | None = None) -> None:
+    def __init__(
+        self, citations: set[EvidenceCitation] | dict[EvidenceCitation, str] | None = None
+    ) -> None:
         self._citations = citations or set()
 
-    def resolve(self, citation: EvidenceCitation) -> EvidenceCitation | None:
-        return citation if citation in self._citations else None
+    def resolve(self, citation: EvidenceCitation) -> object | None:
+        if citation not in self._citations:
+            return None
+        return self._citations[citation] if isinstance(self._citations, dict) else citation
+
+
+def _retry_storm_fixture(context: InvestigationContext) -> EvidenceSet:
+    citations = frozenset(
+        _citation(context, provider)
+        for provider in ("incident-mcp", "operations-mcp", "knowledge-mcp", "source-mcp")
+    )
+    values = {
+        citation: {
+            "incident-mcp": "notification delivery degraded",
+            "operations-mcp": "429 retries backlog latency p99",
+            "knowledge-mcp": "backoff attempt limit jitter",
+            "source-mcp": "immediate retry after 429",
+        }[citation.provider]
+        for citation in citations
+    }
+    return EvidenceSet(
+        context=context,
+        citations=citations,
+        resolvers=(Resolver(values),),
+    )
+
+
+def _retry_storm_report(
+    context: InvestigationContext, evidence_set: EvidenceSet
+) -> InvestigationReport:
+    citations = tuple(evidence_set.citations)
+    claims = tuple(
+        FactualClaim(
+            id=f"fact-{index}",
+            statement=statement,
+            citations=citations,
+        )
+        for index, statement in enumerate(
+            (
+                "The provider returned 429 responses.",
+                "Retries increased the number of attempts.",
+                "The notification backlog grew.",
+                "Notification latency p99 degraded.",
+            )
+        )
+    )
+    return InvestigationReport(
+        schema_version="1.0",
+        incident_id=context.incident_id,
+        investigation_run_id=context.investigation_run_id,
+        impact="Notifications were delayed.",
+        timeline=(),
+        factual_claims=claims,
+        hypotheses=(Hypothesis(statement="Immediate retries amplify rate limiting."),),
+        probable_cause=Hypothesis(statement="429 rate limiting combined with inadequate retries caused the Retry Storm."),
+        confidence=Confidence(level="high", rationale="All four Evidence Providers support the conclusion."),
+        suggested_mitigation=Mitigation(
+            action="Recommend exponential backoff, a maximum attempt limit and jitter.",
+            rationale="These controls reduce immediate retry amplification without executing a change.",
+        ),
+        evidence_gaps=(),
+    )

@@ -19,6 +19,7 @@ from incident_investigation_harness.quality_gate import (
     IncidentOracle,
     QualityGate,
     QualityGateResult,
+    RetryStormOracle,
 )
 from incident_investigation_harness.report import InvestigationReport
 from incident_investigation_harness.scenarios import ScenarioName
@@ -134,7 +135,7 @@ class EvaluatedRunRunner:
         self._investigator = investigator
         self._evidence_set = evidence_set
         self._evidence_set_factory = evidence_set_factory
-        self._oracle = oracle or IncidentOracle()
+        self._oracle = oracle
         self._sandbox = sandbox or InvestigationSandbox()
 
     def run(self, request: EvaluatedRunRequest) -> EvaluatedRunResult:
@@ -145,7 +146,7 @@ class EvaluatedRunRunner:
             events = _validate_events(execution.events, request)
             evidence_set = self._get_evidence_set(request)
             quality_gate = QualityGate.evaluate(
-                execution.report, evidence_set, self._oracle
+                execution.report, evidence_set, self._get_oracle(request)
             )
         except InvestigatorExecutionFailure as error:
             try:
@@ -192,6 +193,13 @@ class EvaluatedRunRunner:
         if evidence_set.context != request.context:
             raise ValueError("EvidenceSet context does not match the evaluated run")
         return evidence_set
+
+    def _get_oracle(self, request: EvaluatedRunRequest) -> IncidentOracle:
+        if self._oracle is not None:
+            return self._oracle
+        if request.scenario == ScenarioName.RETRY_STORM:
+            return RetryStormOracle()
+        return IncidentOracle()
 
 
 def _validate_events(
