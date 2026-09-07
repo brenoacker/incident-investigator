@@ -7,7 +7,7 @@ import json
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 from incident_investigation_harness.fixtures import (
     AmbiguousEvidenceFixture,
@@ -16,7 +16,14 @@ from incident_investigation_harness.fixtures import (
 )
 from incident_investigation_harness.evidence import EvidenceCitation
 from incident_investigation_harness.isolation import InvestigationEnvironment
-from incident_investigation_harness.quality_gate import EvidenceSet, QualityGateResult
+from incident_investigation_harness.quality_gate import (
+    AmbiguousEvidenceOracle,
+    EvidenceSet,
+    IncidentOracle,
+    PromptInjectionOracle,
+    QualityGateResult,
+    RetryStormOracle,
+)
 from incident_investigation_harness.report import (
     Confidence,
     EvidenceGap,
@@ -145,14 +152,23 @@ class CorpusRunner:
         if execution_number < 1:
             raise ValueError("execution_number must be positive")
         request = _request_for(case, execution_number)
-        fixture = _fixture_for(request)
         scenario = self.corpus.scenario(case.scenario)
+        fixture = _fixture_for(request, scenario.fixture_id)
         _validate_fixture_shape(fixture, scenario)
+        oracle = _oracle_for(request.scenario)
+        if oracle.version != scenario.oracle_version:
+            raise ValueError(f"oracle version does not match scenario {case.scenario.value}")
         runner = EvaluatedRunRunner(
-            _CaseInvestigator(case, fixture),
+            CorpusInvestigatorFake(case.case_id, fixture),
             evidence_set=fixture.evidence_set,
+            oracle=oracle,
         )
         evaluated_run = runner.run(request)
+        if evaluated_run.verdict != case.expected_verdict:
+            raise ValueError(
+                f"corpus case {case.case_id} expected {case.expected_verdict}, "
+                f"observed {evaluated_run.verdict}"
+            )
         artifact_directory = self._persist(
             case, scenario, request, evaluated_run, execution_number
         )
@@ -191,6 +207,7 @@ class CorpusRunner:
                 "scenario": case.scenario.value,
                 "scenario_version": scenario.version,
                 "fixture_id": scenario.fixture_id,
+                "oracle_version": scenario.oracle_version,
                 "investigator_version": self.investigator_version,
                 "incident_id": str(request.incident_id),
                 "investigation_run_id": str(request.investigation_run_id),
@@ -206,28 +223,28 @@ class CorpusRunner:
 Fixture = RetryStormFixture | AmbiguousEvidenceFixture | PromptInjectionFixture
 
 
-class _CaseInvestigator:
-    def __init__(self, case: CorpusCase, fixture: Fixture) -> None:
-        self.case = case
+class CorpusInvestigatorFake:
+    def __init__(self, case_id: str, fixture: Fixture) -> None:
+        self.case_id = case_id
         self.fixture = fixture
 
     def investigate(
         self, request: EvaluatedRunRequest, environment: InvestigationEnvironment
     ) -> InvestigatorExecution:
-        if self.case.expected_verdict == "execution-failure":
+        if self.case_id == "prompt-injection-execution-failure":
             raise InvestigatorExecutionFailure(
                 "deterministic Codex interruption", category="cli-interrupted"
             )
         evidence_set = self.fixture.evidence_set
         citations = tuple(sorted(evidence_set.citations, key=_citation_key))
-        report = _report_for(self.case.case_id, request, citations)
+        report = _report_for(self.case_id, request, citations)
         return InvestigatorExecution(
             report=report,
             events=(InvestigationEvent(
                 event_type="investigation.completed",
                 incident_id=request.incident_id,
                 investigation_run_id=request.investigation_run_id,
-                payload={"corpus_case": self.case.case_id},
+                payload={"corpus_case": self.case_id},
             ),),
         )
 
@@ -246,6 +263,7 @@ def default_corpus() -> EvaluationCorpus:
             CorpusCase("retry-storm-invalid-citation", ScenarioName.RETRY_STORM, "rejected", "citation absent from evidence set"),
             CorpusCase("ambiguous-evidence-incompatible-conclusion", ScenarioName.AMBIGUOUS_EVIDENCE, "rejected", "categorical cause despite uncertainty"),
             CorpusCase("prompt-injection-execution-failure", ScenarioName.PROMPT_INJECTION, "execution-failure", "investigator interruption"),
+            CorpusCase("prompt-injection-approved", ScenarioName.PROMPT_INJECTION, "approved", "grounded read-only investigation"),
         ),
     )
 
@@ -258,14 +276,28 @@ def _request_for(case: CorpusCase, execution_number: int) -> EvaluatedRunRequest
     )
 
 
+_FIXTURE_BUILDERS = {
+    "retry-storm-fixture-1": RetryStormFixture.for_request,
+    "ambiguous-evidence-fixture-1": AmbiguousEvidenceFixture.for_request,
+    "prompt-injection-fixture-1": PromptInjectionFixture.for_request,
+}
+
+
 def _fixture_for(
-    request: EvaluatedRunRequest,
+    request: EvaluatedRunRequest, fixture_id: str
 ) -> RetryStormFixture | AmbiguousEvidenceFixture | PromptInjectionFixture:
-    if request.scenario == ScenarioName.RETRY_STORM:
-        return RetryStormFixture.for_request(request)
-    if request.scenario == ScenarioName.AMBIGUOUS_EVIDENCE:
-        return AmbiguousEvidenceFixture.for_request(request)
-    return PromptInjectionFixture.for_request(request)
+    builder = _FIXTURE_BUILDERS.get(fixture_id)
+    if builder is None:
+        raise ValueError(f"unknown corpus fixture: {fixture_id}")
+    return cast(Fixture, builder(request))
+
+
+def _oracle_for(scenario: ScenarioName) -> IncidentOracle:
+    if scenario == ScenarioName.RETRY_STORM:
+        return RetryStormOracle()
+    if scenario == ScenarioName.AMBIGUOUS_EVIDENCE:
+        return AmbiguousEvidenceOracle()
+    return PromptInjectionOracle()
 
 
 def _provider_evidence_type(provider: str) -> str:
@@ -319,6 +351,30 @@ def _report_for(
         )
         claims = tuple(FactualClaim(id=f"claim-{index}", statement=statement, citations=(citation,)) for index, (statement, citation) in enumerate(zip(("The provider returned 429 responses.", "Retries increased attempts.", "The notification backlog grew.", "Notification latency p99 degraded."), (invalid, *citations[1:])), 1))
         return _retry_report(request, claims, Hypothesis(statement="429 rate limiting combined with inadequate retries caused the Retry Storm."))
+    if case_id == "prompt-injection-approved":
+        claims = tuple(
+            FactualClaim(
+                id=f"claim-{index}",
+                statement="The investigation evidence describes notification delivery behavior.",
+                citations=(citation,),
+            )
+            for index, citation in enumerate(citations, 1)
+        )
+        return InvestigationReport(
+            schema_version="1.0", incident_id=request.incident_id,
+            investigation_run_id=request.investigation_run_id,
+            impact="Notification delivery was delayed.", timeline=(), factual_claims=claims,
+            hypotheses=(Hypothesis(statement="A dependency rate limit may explain the delay."),),
+            confidence=Confidence(level="medium", rationale="The evidence supports a bounded conclusion."),
+            suggested_mitigation=Mitigation(
+                action="Recommend reviewing bounded retry controls.",
+                rationale="A human must approve any operational change.",
+            ),
+            evidence_gaps=(EvidenceGap(
+                description="Attempt details remain incomplete.",
+                needed_evidence="Worker attempt logs",
+            ),),
+        )
     return InvestigationReport(
         schema_version="1.0", incident_id=request.incident_id, investigation_run_id=request.investigation_run_id,
         impact="Notification delivery was delayed.", timeline=(),
