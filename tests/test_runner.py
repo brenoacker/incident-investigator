@@ -25,6 +25,7 @@ from incident_investigation_harness.runner import (
     EvaluatedRunRunner,
     InvestigationEvent,
     InvestigatorExecution,
+    RunArtifactStore,
 )
 from incident_investigation_harness.scenarios import ScenarioName
 
@@ -100,6 +101,38 @@ def test_investigator_failure_is_not_quality_rejection_or_approval() -> None:
     assert result.quality_gate is None
     assert result.execution_failure is not None
     assert result.execution_failure.message == "Codex stopped"
+
+
+def test_runner_keeps_artifacts_isolated_between_consecutive_runs() -> None:
+    store = RunArtifactStore()
+
+    class ControlledInvestigator:
+        def investigate(
+            self, request: EvaluatedRunRequest, environment: InvestigationEnvironment
+        ) -> InvestigatorExecution:
+            del environment
+            return InvestigatorExecution(
+                report=_report(request),
+                events=(InvestigationEvent(
+                    event_type="investigation.completed",
+                    incident_id=request.incident_id,
+                    investigation_run_id=request.investigation_run_id,
+                ),),
+            )
+
+    runner = EvaluatedRunRunner(ControlledInvestigator(), artifact_store=store)
+    first = runner.run(_request())
+    second = runner.run(_request())
+
+    assert first.artifacts
+    assert second.artifacts
+    assert {artifact.context for artifact in first.artifacts} == {first.request.context}
+    assert {artifact.context for artifact in second.artifacts} == {second.request.context}
+    assert all(
+        first_artifact.context != second.request.context
+        for first_artifact in first.artifacts
+    )
+    assert all("oracle" not in str(artifact.payload).casefold() for artifact in first.artifacts + second.artifacts)
 
 
 def test_quality_rejection_is_distinct_from_investigator_failure() -> None:

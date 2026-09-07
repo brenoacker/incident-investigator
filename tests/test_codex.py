@@ -5,6 +5,8 @@ import uuid
 from pathlib import Path
 import subprocess
 
+import pytest
+
 from incident_investigation_harness.adapters.codex import CodexInvestigatorAdapter, _query_provider
 from incident_investigation_harness.isolation import InvestigationSandbox
 from incident_investigation_harness.report import InvestigationReport
@@ -86,6 +88,7 @@ def test_runner_reports_missing_codex_output_as_execution_failure() -> None:
 
     assert result.verdict == "execution-failure"
     assert result.execution_failure is not None
+    assert result.execution_failure.category == "report-missing"
     assert "no report output" in result.execution_failure.message
     assert [event.event_type for event in result.events] == [
         "investigation.started",
@@ -134,6 +137,7 @@ def test_codex_rejects_invalid_report_output() -> None:
     ).run(request)
 
     assert result.execution_failure is not None
+    assert result.execution_failure.category == "invalid-output"
     assert "invalid Codex report" in result.execution_failure.message
 
 
@@ -149,8 +153,20 @@ def test_codex_reports_cli_exit_failure() -> None:
     ).run(request)
 
     assert result.execution_failure is not None
+    assert result.execution_failure.category == "cli-interrupted"
     assert "status 7" in result.execution_failure.message
     assert result.events[-1].event_type == "investigation.failed"
+
+
+def test_codex_reports_unavailable_provider_as_execution_failure() -> None:
+    request = _request()
+    result = EvaluatedRunRunner(
+        CodexInvestigatorAdapter({}, command_runner=lambda *args, **kwargs: pytest.fail("CLI must not start")),
+    ).run(request)
+
+    assert result.execution_failure is not None
+    assert result.execution_failure.category == "provider-unavailable"
+    assert not result.approved
 
 
 def test_codex_rejects_mcp_event_without_query_arguments() -> None:

@@ -45,7 +45,10 @@ class CodexInvestigatorAdapter:
         }
         missing = set(environment.allowed_evidence_providers) - set(authorized)
         if missing:
-            raise ValueError(f"no MCP endpoint configured for: {sorted(missing)}")
+            raise InvestigatorExecutionFailure(
+                f"no MCP endpoint configured for: {sorted(missing)}",
+                category="provider-unavailable",
+            )
 
         events: list[InvestigationEvent] = [
             self._event(request, "investigation.started", {"providers": sorted(authorized)})
@@ -73,15 +76,24 @@ class CodexInvestigatorAdapter:
                     timeout=self._timeout_seconds,
                     input=prompt,
                 )
+            except ConnectionError as error:
+                events.append(self._event(request, "investigation.failed", {"error": str(error)}))
+                raise InvestigatorExecutionFailure(
+                    str(error), tuple(events), category="provider-unavailable"
+                ) from error
             except (OSError, subprocess.TimeoutExpired) as error:
                 events.append(self._event(request, "investigation.failed", {"error": str(error)}))
-                raise InvestigatorExecutionFailure(str(error), tuple(events)) from error
+                raise InvestigatorExecutionFailure(
+                    str(error), tuple(events), category="cli-interrupted"
+                ) from error
 
             try:
                 events.extend(self._stream_events(request, environment, completed.stdout))
             except ValueError as error:
                 events.append(self._event(request, "investigation.failed", {"error": str(error)}))
-                raise InvestigatorExecutionFailure(str(error), tuple(events)) from error
+                raise InvestigatorExecutionFailure(
+                    str(error), tuple(events), category="invalid-output"
+                ) from error
             if completed.returncode != 0:
                 events.append(
                     self._event(
@@ -91,16 +103,26 @@ class CodexInvestigatorAdapter:
                     )
                 )
                 raise InvestigatorExecutionFailure(
-                    f"Codex CLI exited with status {completed.returncode}", tuple(events)
+                    f"Codex CLI exited with status {completed.returncode}",
+                    tuple(events),
+                    category="cli-interrupted",
                 )
             if not output_path.exists():
                 events.append(self._event(request, "investigation.failed", {"error": "missing report output"}))
-                raise InvestigatorExecutionFailure("Codex CLI produced no report output", tuple(events))
+                raise InvestigatorExecutionFailure(
+                    "Codex CLI produced no report output",
+                    tuple(events),
+                    category="report-missing",
+                )
             try:
                 report = _load_report(output_path)
             except (OSError, ValueError, TypeError, json.JSONDecodeError) as error:
                 events.append(self._event(request, "investigation.failed", {"error": str(error)}))
-                raise InvestigatorExecutionFailure(f"invalid Codex report: {error}", tuple(events)) from error
+                raise InvestigatorExecutionFailure(
+                    f"invalid Codex report: {error}",
+                    tuple(events),
+                    category="invalid-output",
+                ) from error
 
         events.append(self._event(request, "investigation.output", {"schema_version": report.schema_version}))
         events.append(self._event(request, "investigation.completed", {"schema_version": report.schema_version}))

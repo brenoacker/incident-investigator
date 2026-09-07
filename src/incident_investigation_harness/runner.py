@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from typing import Callable, Mapping, Protocol
+from typing import Callable, Literal, Mapping, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -63,9 +63,16 @@ class InvestigatorExecution(BaseModel):
 class InvestigatorExecutionFailure(RuntimeError):
     """An investigator failure that still has scoped audit events to preserve."""
 
-    def __init__(self, message: str, events: tuple[InvestigationEvent, ...] = ()) -> None:
+    def __init__(
+        self,
+        message: str,
+        events: tuple[InvestigationEvent, ...] = (),
+        *,
+        category: str = "investigator-error",
+    ) -> None:
         super().__init__(message)
         self.events = events
+        self.category = category
 
 
 class InvestigatorAdapter(Protocol):
@@ -76,13 +83,71 @@ class InvestigatorAdapter(Protocol):
     ) -> InvestigatorExecution: ...
 
 
+ExecutionFailureCategory = Literal[
+    "provider-unavailable",
+    "cli-interrupted",
+    "invalid-output",
+    "report-missing",
+    "investigator-error",
+    "runner-error",
+]
+
+
+class RunArtifact(BaseModel):
+    """Safe, run-scoped material retained for audit and troubleshooting."""
+
+    model_config = ConfigDict(frozen=True)
+
+    artifact_type: Literal["events", "report", "evidence"]
+    context: InvestigationContext
+    payload: Mapping[str, object]
+
+
+class RunArtifactStore:
+    """Store artifacts by Investigation Run identity, never in one shared bucket."""
+
+    def __init__(self) -> None:
+        self._artifacts: dict[uuid.UUID, tuple[RunArtifact, ...]] = {}
+
+    def start(self, context: InvestigationContext) -> None:
+        """Begin an attempt and discard stale data for a reused run identity."""
+        self._artifacts[context.investigation_run_id] = ()
+
+    def record(self, artifact: RunArtifact) -> None:
+        existing = self._artifacts.get(artifact.context.investigation_run_id)
+        if existing is None or any(
+            item.context != artifact.context for item in existing
+        ):
+            raise ValueError("artifact does not belong to an active Investigation Run")
+        self._artifacts[artifact.context.investigation_run_id] = (*existing, artifact)
+
+    def for_run(self, context: InvestigationContext) -> tuple[RunArtifact, ...]:
+        """Return only artifacts belonging to this exact run context."""
+        return tuple(
+            artifact
+            for artifact in self._artifacts.get(context.investigation_run_id, ())
+            if artifact.context == context
+        )
+
+
 class ExecutionFailure(BaseModel):
     """A failure to produce investigation output, never a Quality Gate verdict."""
 
     model_config = ConfigDict(frozen=True)
 
-    error_type: str = Field(min_length=1)
-    message: str = Field(min_length=1)
+    category: ExecutionFailureCategory
+    cause: str = Field(min_length=1)
+    artifacts: tuple[RunArtifact, ...] = ()
+
+    @property
+    def error_type(self) -> str:
+        """Compatibility label for callers that used the old failure contract."""
+        return self.category
+
+    @property
+    def message(self) -> str:
+        """Compatibility alias for the failure cause."""
+        return self.cause
 
 
 @dataclass(frozen=True)
@@ -95,6 +160,7 @@ class EvaluatedRunResult:
     quality_gate: QualityGateResult | None
     execution_failure: ExecutionFailure | None
     isolation_probes: tuple[IsolationProbeResult, ...]
+    artifacts: tuple[RunArtifact, ...] = ()
 
     @property
     def approved(self) -> bool:
@@ -127,6 +193,7 @@ class EvaluatedRunRunner:
         oracle: IncidentOracle | None = None,
         evidence_set_factory: EvidenceSetFactory | None = None,
         sandbox: InvestigationSandbox | None = None,
+        artifact_store: RunArtifactStore | None = None,
     ) -> None:
         if evidence_set is not None and evidence_set_factory is not None:
             raise ValueError("provide evidence_set or evidence_set_factory, not both")
@@ -135,14 +202,19 @@ class EvaluatedRunRunner:
         self._evidence_set_factory = evidence_set_factory
         self._oracle = oracle
         self._sandbox = sandbox
+        self._artifact_store = artifact_store or RunArtifactStore()
 
     def run(self, request: EvaluatedRunRequest) -> EvaluatedRunResult:
         """Execute one run; investigator errors are explicit and never evaluated."""
+        self._artifact_store.start(request.context)
         try:
             environment = self._sandbox_for(request).prepare(request.context)
             execution = self._investigator.investigate(request, environment)
             events = _validate_events(execution.events, request)
+            self._artifact_store.record(_events_artifact(request.context, events))
+            self._artifact_store.record(_report_artifact(request.context, execution.report))
             evidence_set = self._get_evidence_set(request)
+            self._artifact_store.record(_evidence_artifact(request.context, evidence_set))
             quality_gate = QualityGate.evaluate(
                 execution.report,
                 evidence_set,
@@ -155,30 +227,20 @@ class EvaluatedRunRunner:
                 events = _validate_events(error.events, request)
             except ValueError:
                 events = ()
+            if events:
+                self._artifact_store.record(_events_artifact(request.context, events))
             return EvaluatedRunResult(
                 request=request,
                 report=None,
                 events=events,
                 quality_gate=None,
                 execution_failure=ExecutionFailure(
-                    error_type=type(error).__name__, message=str(error) or "unknown error"
+                    category=_failure_category(error.category),
+                    cause=str(error) or "unknown error",
+                    artifacts=self._artifact_store.for_run(request.context),
                 ),
                 isolation_probes=(),
-            )
-        except InvestigatorExecutionFailure as error:
-            try:
-                events = _validate_events(error.events, request)
-            except ValueError:
-                events = ()
-            return EvaluatedRunResult(
-                request=request,
-                report=None,
-                events=events,
-                quality_gate=None,
-                execution_failure=ExecutionFailure(
-                    error_type=type(error).__name__, message=str(error) or "unknown error"
-                ),
-                isolation_probes=(),
+                artifacts=self._artifact_store.for_run(request.context),
             )
         except Exception as error:  # boundary converts adapter failures to a result
             return EvaluatedRunResult(
@@ -187,7 +249,9 @@ class EvaluatedRunRunner:
                 events=(),
                 quality_gate=None,
                 execution_failure=ExecutionFailure(
-                    error_type=type(error).__name__, message=str(error) or "unknown error"
+                    category="runner-error",
+                    cause=str(error) or "unknown error",
+                    artifacts=self._artifact_store.for_run(request.context),
                 ),
                 isolation_probes=(),
             )
@@ -198,6 +262,7 @@ class EvaluatedRunRunner:
             quality_gate=quality_gate,
             execution_failure=None,
             isolation_probes=environment.isolation_probes,
+            artifacts=self._artifact_store.for_run(request.context),
         )
 
     def _get_evidence_set(self, request: EvaluatedRunRequest) -> EvidenceSet:
@@ -242,3 +307,43 @@ def _validate_events(
     ):
         raise ValueError("investigator emitted an event for another Investigation Run")
     return events
+
+
+def _failure_category(category: str) -> ExecutionFailureCategory:
+    if category in {
+        "provider-unavailable",
+        "cli-interrupted",
+        "invalid-output",
+        "report-missing",
+        "investigator-error",
+    }:
+        return category  # type: ignore[return-value]
+    return "investigator-error"
+
+
+def _events_artifact(
+    context: InvestigationContext, events: tuple[InvestigationEvent, ...]
+) -> RunArtifact:
+    return RunArtifact(
+        artifact_type="events",
+        context=context,
+        payload={"events": tuple(event.model_dump(mode="json") for event in events)},
+    )
+
+
+def _report_artifact(
+    context: InvestigationContext, report: InvestigationReport
+) -> RunArtifact:
+    return RunArtifact(
+        artifact_type="report", context=context, payload=report.model_dump(mode="json")
+    )
+
+
+def _evidence_artifact(
+    context: InvestigationContext, evidence_set: EvidenceSet
+) -> RunArtifact:
+    return RunArtifact(
+        artifact_type="evidence",
+        context=context,
+        payload={"citations": tuple(citation.model_dump(mode="json") for citation in evidence_set.citations)},
+    )
