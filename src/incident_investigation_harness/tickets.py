@@ -7,6 +7,7 @@ from typing import Protocol
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from incident_investigation_harness.context import InvestigationContext
+from incident_investigation_harness.telemetry import span, telemetry
 
 
 class TicketCreate(BaseModel):
@@ -45,7 +46,15 @@ class TicketNotFound(Exception):
 
 
 def create_ticket(repository: TicketRepository, ticket: TicketCreate) -> Ticket:
-    return repository.create(ticket)
+    with span(
+        "ticket.create",
+        context=ticket.investigation_context,
+        component="ticketing-saas",
+        operation="create-ticket",
+    ):
+        created = repository.create(ticket)
+        telemetry.tickets_created.add(1)
+        return created
 
 
 def find_ticket(repository: TicketRepository, ticket_id: uuid.UUID) -> Ticket:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from time import perf_counter
 from typing import Literal, Mapping, Protocol
 
 from pydantic import BaseModel, ConfigDict, ValidationError
@@ -8,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from incident_investigation_harness.context import InvestigationContext
 from incident_investigation_harness.evidence import EvidenceCitation
 from incident_investigation_harness.report import InvestigationReport
+from incident_investigation_harness.telemetry import span, telemetry
 
 QualityGateReasonCode = Literal[
     "invalid-schema",
@@ -361,7 +363,39 @@ class QualityGate:
         events: tuple[object, ...] = (),
         environment: object | None = None,
     ) -> QualityGateResult:
+        """Evaluate and instrument the complete deterministic Quality Gate operation."""
+        started = perf_counter()
+        result: QualityGateResult | None = None
+        try:
+            with span(
+                "quality-gate.evaluate",
+                context=evidence_set.context,
+                component="quality-gate",
+                operation="evaluate",
+                attributes={"oracle": type(oracle).__name__},
+            ):
+                result = QualityGate._evaluate(
+                    report, evidence_set, oracle, events=events, environment=environment
+                )
+        finally:
+            telemetry.quality_gate_duration.record(
+                perf_counter() - started,
+                {"verdict": result.verdict if result is not None else "error"},
+            )
+        assert result is not None
+        return result
+
+    @staticmethod
+    def _evaluate(
+        report: InvestigationReport | Mapping[str, object] | object,
+        evidence_set: EvidenceSet,
+        oracle: IncidentOracle,
+        *,
+        events: tuple[object, ...] = (),
+        environment: object | None = None,
+    ) -> QualityGateResult:
         """Evaluate a report without exposing or interpreting the private Oracle."""
+        telemetry.quality_gate_calls.add(1, {"scenario": type(oracle).__name__})
         try:
             validated_report = InvestigationReport.model_validate(
                 report.model_dump(mode="json")

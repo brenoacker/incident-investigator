@@ -23,11 +23,15 @@ services:
     environment:
       DATABASE_URL: postgresql://ticketing:ticketing@db:5432/ticketing
       REDIS_URL: redis://redis:6379/0
+      OTEL_SERVICE_NAME: harness
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
+      otel-collector:
+        condition: service_started
     healthcheck:
       test:
         - CMD
@@ -47,11 +51,15 @@ services:
     environment:
       DATABASE_URL: postgresql://ticketing:ticketing@db:5432/ticketing
       REDIS_URL: redis://redis:6379/0
+      OTEL_SERVICE_NAME: notification-worker
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
+      otel-collector:
+        condition: service_started
     command: ["uv", "run", "--no-sync", "python", "-m", "incident_investigation_harness.notification_worker"]
 
   redis:
@@ -69,6 +77,9 @@ services:
       context: .
     ports:
       - "8001:8001"
+    environment:
+      OTEL_SERVICE_NAME: incident-mcp
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
     command:
       [
         "uv",
@@ -84,6 +95,9 @@ services:
       context: .
     ports:
       - "8002:8002"
+    environment:
+      OTEL_SERVICE_NAME: operations-mcp
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
     command:
       [
         "uv",
@@ -99,6 +113,9 @@ services:
       context: .
     ports:
       - "8003:8003"
+    environment:
+      OTEL_SERVICE_NAME: knowledge-mcp
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
     command:
       [
         "uv",
@@ -114,6 +131,9 @@ services:
       context: .
     ports:
       - "8004:8004"
+    environment:
+      OTEL_SERVICE_NAME: source-mcp
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
     command:
       [
         "uv",
@@ -123,6 +143,57 @@ services:
         "-m",
         "incident_investigation_harness.mcp.source_mcp"
       ]
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.120.0
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    volumes:
+      - ./observability/otel-collector.yaml:/etc/otelcol-contrib/config.yaml:ro
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+      - "8889:8889"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:13133/"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    depends_on:
+      jaeger:
+        condition: service_started
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.68
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"
+      - "4319:4317"
+
+  prometheus:
+    image: prom/prometheus:v3.2.1
+    volumes:
+      - ./observability/prometheus.yaml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    depends_on:
+      harness:
+        condition: service_healthy
+
+  grafana:
+    image: grafana/grafana:11.5.2
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      prometheus:
+        condition: service_started
 
 volumes:
   ticketing-data:

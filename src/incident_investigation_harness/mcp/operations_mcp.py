@@ -13,12 +13,14 @@ from incident_investigation_harness.operational_evidence import (
     OperationalEvidenceQuery,
     OperationalEvidenceType,
 )
+from incident_investigation_harness.telemetry import instrument_evidence_query
 
 mcp = FastMCP("operations-mcp", host="0.0.0.0", port=8002)
 repository = build_operational_evidence_repository()
 
 
 @mcp.tool()
+@instrument_evidence_query("operations-mcp", "query")
 def query_operational_evidence(
     incident_id: str,
     investigation_run_id: str,
@@ -46,6 +48,7 @@ def query_operational_evidence(
 
 
 @mcp.tool()
+@instrument_evidence_query("operations-mcp", "resolve-citation")
 def resolve_operational_evidence_citation(
     provider: str,
     incident_id: str,
