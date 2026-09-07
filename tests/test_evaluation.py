@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from incident_investigation_harness.evaluation import (
     EVALUATED_SCENARIOS,
+    evaluation_exit_code,
     evidence_set_for,
     request_for,
 )
+from incident_investigation_harness.runner import EvaluatedRunResult
 from incident_investigation_harness.scenarios import ScenarioName
 
 
@@ -41,3 +43,18 @@ def test_ambiguous_evaluation_exposes_only_its_authorized_providers() -> None:
         "incident-mcp",
         "operations-mcp",
     }
+
+
+def test_evaluation_exit_code_requires_every_run_to_be_approved() -> None:
+    assert evaluation_exit_code(()) == 0
+
+    rejected = EvaluatedRunResult(
+        request=request_for(ScenarioName.RETRY_STORM, 1),
+        report=None,
+        events=(),
+        quality_gate=None,
+        execution_failure=None,
+        isolation_probes=(),
+    )
+
+    assert evaluation_exit_code((rejected,)) == 1

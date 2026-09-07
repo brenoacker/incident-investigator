@@ -161,6 +161,11 @@ def _result_payload(result: EvaluatedRunResult) -> dict[str, object]:
     }
 
 
+def evaluation_exit_code(results: Iterable[EvaluatedRunResult]) -> int:
+    """Return a shell-friendly status: zero only when every eval is approved."""
+    return 0 if all(result.approved for result in results) else 1
+
+
 def _incident_citations(response: object) -> Iterable[EvidenceCitation]:
     typed = response  # kept local to avoid exposing repository implementation details
     ticket = getattr(typed, "ticket", None)
@@ -176,7 +181,7 @@ def _operational_citations(response: object) -> Iterable[EvidenceCitation]:
     yield from (item.citation for item in getattr(response, "traces", ()))
 
 
-def main() -> None:
+def main() -> None:  # pragma: no cover - CLI wiring is exercised by the operator
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path, default=Path("artifacts/evaluations"))
     parser.add_argument("--execution-number", type=int, required=True)
@@ -199,7 +204,20 @@ def main() -> None:
         codex_executable=args.codex_executable,
         timeout_seconds=args.timeout_seconds,
     )
-    print(json.dumps({"runs": len(results), "output_dir": str(args.output_dir / f"run-{args.execution_number}")}, indent=2))
+    print(
+        json.dumps(
+            {
+                "runs": len(results),
+                "output_dir": str(args.output_dir / f"run-{args.execution_number}"),
+                "verdicts": [
+                    {"scenario": result.request.scenario.value, "verdict": result.verdict}
+                    for result in results
+                ],
+            },
+            indent=2,
+        )
+    )
+    raise SystemExit(evaluation_exit_code(results))
 
 
 if __name__ == "__main__":
