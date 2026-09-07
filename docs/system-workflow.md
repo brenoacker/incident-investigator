@@ -34,6 +34,21 @@ flowchart LR
 
 The flows connect through evidence and the `incident_id` and `investigation_run_id` identifiers. These identifiers relate tickets, MCP queries, logs, traces, metrics and the report to the same Investigation Run.
 
+## 2.1 Validation modes
+
+The repository separates deterministic checks from live model evaluations:
+
+| Test location | Purpose | Runs in the default GitHub workflow? |
+| --- | --- | --- |
+| `tests/unit` | Validate isolated domain and infrastructure behavior | Yes |
+| `tests/contract` | Validate public component and adapter contracts with controlled doubles | Yes |
+| `tests/integration` | Validate behavior against explicitly configured external services | Yes, with unavailable services skipped |
+| `tests/evals` | Invoke Codex against live MCP services and evaluate model behavior | No; run explicitly when credentials and Compose are available |
+
+The default command is `uv run python -m pytest tests/unit tests/contract tests/integration`.
+Live evals are intentionally excluded from CI because they require AI access and may consume
+model tokens.
+
 ## 3. Main components
 
 | Component | Plain-language role | Participates in |

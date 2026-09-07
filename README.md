@@ -19,31 +19,40 @@ uv sync
 Run tests and static checking:
 
 ```sh
-uv run python -m pytest
+uv run python -m pytest tests/unit tests/contract tests/integration
 uv run mypy
 ```
 
-The test command measures all production code under `src/incident_investigation_harness` and fails when total coverage is below 90%.
+This deterministic suite measures all production code under
+`src/incident_investigation_harness` and fails when total coverage is below 90%.
+It does not invoke Codex or spend model tokens. The live Codex tests are kept in
+`tests/evals` and must be run explicitly.
 
 To demonstrate the real Codex path against the Compose `incident-mcp`, authenticate Codex,
-start the MCP service, and run `RUN_CODEX_INTEGRATION=1 uv run pytest tests/test_codex_real.py -m integration`.
-The test is opt-in because it requires Codex credentials and a live MCP endpoint.
+start the MCP service, and run the opt-in eval:
+
+```sh
+RUN_CODEX_EVAL=1 uv run pytest tests/evals -m eval --no-cov
+```
+
+On PowerShell use `$env:RUN_CODEX_EVAL = "1"` before the command. This eval requires
+Codex credentials and a live MCP endpoint and may consume model tokens.
 
 ### Integration tests
 
-`tests/test_postgres_integration.py` verifies that a ticket remains available after the API process restarts. It requires accessible PostgreSQL and a configured `DATABASE_URL`. In PowerShell, using the local virtual environment:
+`tests/integration/test_postgres_integration.py` verifies that a ticket remains available after the API process restarts. It requires accessible PostgreSQL and a configured `DATABASE_URL`. In PowerShell, using the local virtual environment:
 
 ```powershell
 $env:DATABASE_URL = "postgresql://ticketing:ticketing@localhost:5432/ticketing"
-.\.venv\Scripts\python.exe -m pytest -m integration
+.\.venv\Scripts\python.exe -m pytest tests/integration -m integration
 ```
 
 The example assumes PostgreSQL is available at `localhost:5432`. The Compose `db` service does not publish that port to the host; use a local PostgreSQL instance or publish the port before running the integration test.
 
-To run all tests with integration enabled:
+To run the complete non-live suite, including integration tests:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest
+.\.venv\Scripts\python.exe -m pytest tests/unit tests/contract tests/integration
 ```
 
 Without `DATABASE_URL`, the integration test is marked `skipped`; the fast tests using `TicketRepositoryFake` still run.
@@ -109,7 +118,8 @@ JSONL events and runner artifacts remain the authoritative run-scoped audit reco
 
 The reproducible evaluation path uses the Codex CLI, not the desktop application. The
 desktop is useful for dogfooding the MCPs and inspecting the local stack; the CLI is the
-evaluation executor and writes the audit artifacts.
+evaluation executor and writes the audit artifacts. This is a live LLM evaluation and
+can consume model tokens; it is separate from the deterministic pytest suite above.
 
 Start from a clean local environment:
 
@@ -124,7 +134,7 @@ Authenticate the Codex CLI in the host environment, then run all three minimum s
 
 ```powershell
 $env:PYTHONPATH = "src"
-python -m incident_investigation_harness.evaluation --execution-number 1
+python -m incident_investigation_harness.evaluation --execution-number 1 --codex codex.cmd
 ```
 
 The command runs `retry-storm`, `ambiguous-evidence` and `prompt-injection` through the

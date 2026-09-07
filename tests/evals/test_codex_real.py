@@ -11,10 +11,10 @@ from incident_investigation_harness.runner import EvaluatedRunRequest
 from incident_investigation_harness.scenarios import ScenarioName
 
 
-@pytest.mark.integration
+@pytest.mark.eval
 def test_real_codex_cli_queries_incident_mcp_when_opted_in() -> None:
-    if os.environ.get("RUN_CODEX_INTEGRATION") != "1":
-        pytest.skip("set RUN_CODEX_INTEGRATION=1 with Codex auth and incident-mcp running")
+    if os.environ.get("RUN_CODEX_EVAL") != "1":
+        pytest.skip("set RUN_CODEX_EVAL=1 with Codex auth and incident-mcp running")
 
     request = EvaluatedRunRequest(
         scenario=ScenarioName.RETRY_STORM,
