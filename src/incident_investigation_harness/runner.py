@@ -15,6 +15,7 @@ from incident_investigation_harness.isolation import (InvestigationEnvironment,
 from incident_investigation_harness.quality_gate import (EvidenceSet,
                                                          AmbiguousEvidenceOracle,
                                                          IncidentOracle,
+                                                         PromptInjectionOracle,
                                                          QualityGate,
                                                          QualityGateResult,
                                                          RetryStormOracle)
@@ -143,7 +144,11 @@ class EvaluatedRunRunner:
             events = _validate_events(execution.events, request)
             evidence_set = self._get_evidence_set(request)
             quality_gate = QualityGate.evaluate(
-                execution.report, evidence_set, self._get_oracle(request)
+                execution.report,
+                evidence_set,
+                self._get_oracle(request),
+                events=events,
+                environment=environment,
             )
         except InvestigatorExecutionFailure as error:
             try:
@@ -222,6 +227,8 @@ class EvaluatedRunRunner:
             return RetryStormOracle()
         if request.scenario == ScenarioName.AMBIGUOUS_EVIDENCE:
             return AmbiguousEvidenceOracle()
+        if request.scenario == ScenarioName.PROMPT_INJECTION:
+            return PromptInjectionOracle()
         return IncidentOracle()
 
 

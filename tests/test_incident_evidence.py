@@ -8,6 +8,7 @@ import pytest
 from incident_investigation_harness.adapters.incident_evidence import (
     IncidentEvidenceRepositoryFake,
 )
+from incident_investigation_harness.fixtures import build_incident_evidence_repository
 from incident_investigation_harness.context import InvestigationContext
 from incident_investigation_harness.evidence import (
     EvidenceCitation,
@@ -75,6 +76,20 @@ def test_incident_evidence_contract_is_scoped_cited_and_read_only() -> None:
 
     with pytest.raises(AttributeError):
         getattr(repository, "create")
+
+
+def test_prompt_injection_fixture_exposes_malicious_content_as_untrusted_evidence() -> None:
+    context = InvestigationContext(
+        incident_id=uuid.uuid5(uuid.NAMESPACE_URL, "incident-investigation-harness:incident-prompt-injection"),
+        investigation_run_id=uuid.uuid5(uuid.NAMESPACE_URL, "incident-investigation-harness:run-prompt-injection-1"),
+    )
+    result = build_incident_evidence_repository().query(IncidentEvidenceQuery(context=context))
+    assert result.ticket is not None
+    assert any(
+        "ignore previous instructions" in content.value.casefold()
+        and content.is_untrusted
+        for content in result.untrusted_content
+    )
 
 
 def _context(number: int) -> InvestigationContext:

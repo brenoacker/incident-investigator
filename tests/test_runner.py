@@ -7,7 +7,7 @@ import uuid
 
 from incident_investigation_harness.adapters.codex import CodexInvestigatorAdapter
 from incident_investigation_harness.evidence import EvidenceCitation
-from incident_investigation_harness.fixtures import AmbiguousEvidenceFixture
+from incident_investigation_harness.fixtures import AmbiguousEvidenceFixture, PromptInjectionFixture
 from incident_investigation_harness.isolation import (
     InvestigationEnvironment,
     InvestigationSandbox,
@@ -16,6 +16,8 @@ from incident_investigation_harness.quality_gate import EvidenceSet, IncidentOra
 from incident_investigation_harness.report import (
     Confidence,
     FactualClaim,
+    EvidenceGap,
+    Hypothesis,
     InvestigationReport,
 )
 from incident_investigation_harness.runner import (
@@ -183,6 +185,52 @@ def test_runner_approves_an_ambiguous_run_with_calibrated_uncertainty() -> None:
     assert result.approved
     assert result.report is not None
     assert result.report.probable_cause is None
+    assert result.execution_failure is None
+
+
+def test_runner_approves_prompt_injection_run_only_with_audited_read_only_execution() -> None:
+    request = _request(scenario=ScenarioName.PROMPT_INJECTION)
+    fixture = PromptInjectionFixture.for_request(request)
+
+    class ControlledInvestigator:
+        def investigate(
+            self, received: EvaluatedRunRequest, environment: InvestigationEnvironment
+        ) -> InvestigatorExecution:
+            assert environment.can_write is False
+            assert environment.can_evaluate is False
+            citation = next(iter(fixture.citations))
+            return InvestigatorExecution(
+                report=InvestigationReport(
+                    schema_version="1.0",
+                    incident_id=received.incident_id,
+                    investigation_run_id=received.investigation_run_id,
+                    impact="Notification delivery was delayed.",
+                    timeline=(),
+                    factual_claims=(FactualClaim(
+                        id="claim-1",
+                        statement="The provider returned 429 and latency increased.",
+                        citations=tuple(fixture.citations),
+                    ),),
+                    hypotheses=(Hypothesis(statement="A dependency rate limit may explain the delay."),),
+                    confidence=Confidence(level="medium", rationale="The evidence supports a bounded conclusion."),
+                    suggested_mitigation={"action": "Recommend bounded backoff.", "rationale": "Review evidence before any human-approved action."},
+                    evidence_gaps=(EvidenceGap(description="Attempt details remain incomplete.", needed_evidence="Worker attempt logs"),),
+                ),
+                events=(InvestigationEvent(
+                    event_type="investigation.completed",
+                    incident_id=received.incident_id,
+                    investigation_run_id=received.investigation_run_id,
+                ),),
+            )
+
+    result = EvaluatedRunRunner(
+        ControlledInvestigator(),
+        evidence_set_factory=lambda run: PromptInjectionFixture.for_request(run).evidence_set,
+    ).run(request)
+
+    assert result.approved
+    assert result.quality_gate is not None
+    assert result.isolation_probes
     assert result.execution_failure is None
 
 
