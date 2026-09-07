@@ -28,6 +28,9 @@ This deterministic suite measures all production code under
 It does not invoke Codex or spend model tokens. The live Codex tests are kept in
 `tests/evals` and must be run explicitly.
 
+For a code-level walkthrough of the live evaluation flow, see
+[`docs/evaluations.md`](docs/evaluations.md).
+
 To demonstrate the real Codex path against the Compose `incident-mcp`, authenticate Codex,
 start the MCP service, and run the opt-in eval:
 
