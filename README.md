@@ -19,31 +19,43 @@ uv sync
 Run tests and static checking:
 
 ```sh
-uv run python -m pytest
+uv run python -m pytest tests/unit tests/contract tests/integration
 uv run mypy
 ```
 
-The test command measures all production code under `src/incident_investigation_harness` and fails when total coverage is below 90%.
+This deterministic suite measures all production code under
+`src/incident_investigation_harness` and fails when total coverage is below 90%.
+It does not invoke Codex or spend model tokens. The live Codex tests are kept in
+`tests/evals` and must be run explicitly.
+
+For a code-level walkthrough of the live evaluation flow, see
+[`docs/evaluations.md`](docs/evaluations.md).
 
 To demonstrate the real Codex path against the Compose `incident-mcp`, authenticate Codex,
-start the MCP service, and run `RUN_CODEX_INTEGRATION=1 uv run pytest tests/test_codex_real.py -m integration`.
-The test is opt-in because it requires Codex credentials and a live MCP endpoint.
+start the MCP service, and run the opt-in eval:
+
+```sh
+RUN_CODEX_EVAL=1 uv run pytest tests/evals -m eval --no-cov
+```
+
+On PowerShell use `$env:RUN_CODEX_EVAL = "1"` before the command. This eval requires
+Codex credentials and a live MCP endpoint and may consume model tokens.
 
 ### Integration tests
 
-`tests/test_postgres_integration.py` verifies that a ticket remains available after the API process restarts. It requires accessible PostgreSQL and a configured `DATABASE_URL`. In PowerShell, using the local virtual environment:
+`tests/integration/test_postgres_integration.py` verifies that a ticket remains available after the API process restarts. It requires accessible PostgreSQL and a configured `DATABASE_URL`. In PowerShell, using the local virtual environment:
 
 ```powershell
 $env:DATABASE_URL = "postgresql://ticketing:ticketing@localhost:5432/ticketing"
-.\.venv\Scripts\python.exe -m pytest -m integration
+.\.venv\Scripts\python.exe -m pytest tests/integration -m integration
 ```
 
 The example assumes PostgreSQL is available at `localhost:5432`. The Compose `db` service does not publish that port to the host; use a local PostgreSQL instance or publish the port before running the integration test.
 
-To run all tests with integration enabled:
+To run the complete non-live suite, including integration tests:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest
+.\.venv\Scripts\python.exe -m pytest tests/unit tests/contract tests/integration
 ```
 
 Without `DATABASE_URL`, the integration test is marked `skipped`; the fast tests using `TicketRepositoryFake` still run.
@@ -104,3 +116,56 @@ Every span carries the component, operation and (when available) `incident_id` a
 `investigation_run_id`. Prometheus labels contain only bounded values such as scenario,
 provider, operation, result and verdict; unique run identifiers are never metric labels.
 JSONL events and runner artifacts remain the authoritative run-scoped audit records.
+
+## Three minimum evaluations
+
+The reproducible evaluation path uses the Codex CLI, not the desktop application. The
+desktop is useful for dogfooding the MCPs and inspecting the local stack; the CLI is the
+evaluation executor and writes the audit artifacts. This is a live LLM evaluation and
+can consume model tokens; it is separate from the deterministic pytest suite above.
+
+Start from a clean local environment:
+
+```powershell
+docker compose down -v
+docker compose up --build -d
+docker compose ps
+Invoke-WebRequest http://localhost:8000/health
+```
+
+Authenticate the Codex CLI in the host environment, then run all three minimum scenarios:
+
+```powershell
+$env:PYTHONPATH = "src"
+python -m incident_investigation_harness.evaluation --execution-number 1 --codex codex.cmd
+```
+
+The command runs `retry-storm`, `ambiguous-evidence` and `prompt-injection` through the
+read-only Codex adapter. Each scenario receives a distinct `incident_id` and
+`investigation_run_id`. Results are written under
+`artifacts/evaluations/run-1/<scenario>/` as `result.json`, `report.json` (when a report
+exists) and `events.jsonl`; `manifest.json` records the run identities and verdicts.
+The command refuses to overwrite an existing run directory. To demonstrate isolation,
+repeat with a new execution number and compare the two manifests:
+
+```powershell
+python -m incident_investigation_harness.evaluation --execution-number 2
+Compare-Object (Get-Content artifacts/evaluations/run-1/manifest.json) `
+               (Get-Content artifacts/evaluations/run-2/manifest.json)
+```
+
+Execution numbers `1` through `10` are provisioned in the local fixtures so repeated
+evaluations keep the same scenario evidence shape while using a new run identity.
+
+Inspect correlation in Jaeger by searching the `incident_id` or
+`investigation_run_id` span attribute. In Prometheus use the bounded run and provider
+metrics; in Grafana open the provisioned `Investigation Harness` dashboard for duration,
+failures, Quality Gate activity, notification backlog and Retry Storm retries. The
+identifiers intentionally remain span attributes rather than metric labels.
+
+For a clean retry, remove the local artifacts and Compose volume before starting again:
+
+```powershell
+Remove-Item -Recurse -Force artifacts/evaluations -ErrorAction SilentlyContinue
+docker compose down -v
+```

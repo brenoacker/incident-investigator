@@ -26,6 +26,6 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked
       - name: Run tests with coverage gate
-        run: uv run python -m pytest
+        run: uv run python -m pytest tests/unit tests/contract tests/integration
       - name: Run type checker
         run: uv run mypy

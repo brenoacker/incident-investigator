@@ -27,14 +27,15 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests/unit", "tests/contract", "tests/integration"]
 addopts = [
     "--cov=src/incident_investigation_harness",
     "--cov-report=term-missing",
     "--cov-fail-under=90",
 ]
 markers = [
-    "integration: requires a running PostgreSQL instance",
+    "integration: requires external services such as PostgreSQL",
+    "eval: invokes Codex and may consume model tokens",
 ]
 
 [tool.mypy]
