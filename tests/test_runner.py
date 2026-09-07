@@ -132,7 +132,10 @@ def test_runner_approves_an_ambiguous_run_with_calibrated_uncertainty() -> None:
         def investigate(
             self, received: EvaluatedRunRequest, environment: InvestigationEnvironment
         ) -> InvestigatorExecution:
-            del environment
+            assert environment.allowed_evidence_providers == (
+                "incident-mcp",
+                "operations-mcp",
+            )
             citation = next(iter(fixture.citations))
             return InvestigatorExecution(
                 report=InvestigationReport(
