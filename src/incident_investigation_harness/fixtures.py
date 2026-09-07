@@ -123,7 +123,7 @@ class AmbiguousEvidenceFixture:
             evidence_set=EvidenceSet(
                 context=context,
                 citations=citations,
-                resolvers=(_AmbiguousEvidenceFixtureResolver(values),),
+                resolvers=(_AmbiguousEvidenceFixtureFake(values),),
             ),
         )
 
@@ -141,7 +141,7 @@ class _RetryStormFixtureResolver:
         return self._values.get(citation)
 
 
-class _AmbiguousEvidenceFixtureResolver:
+class _AmbiguousEvidenceFixtureFake:
     def __init__(self, values: dict[EvidenceCitation, str]) -> None:
         self._values = values
 

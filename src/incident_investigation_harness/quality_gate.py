@@ -194,7 +194,10 @@ class AmbiguousEvidenceOracle(IncidentOracle):
                     message="ambiguous evidence requires low confidence",
                 )
             )
-        if len(report.hypotheses) < self.minimum_hypotheses:
+        distinct_hypotheses = {
+            hypothesis.statement.casefold().strip() for hypothesis in report.hypotheses
+        }
+        if len(distinct_hypotheses) < self.minimum_hypotheses:
             reasons.append(
                 QualityGateReason(
                     code="scenario-criteria-not-met",

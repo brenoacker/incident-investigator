@@ -196,6 +196,19 @@ def test_ambiguous_evidence_oracle_rejects_unsupported_categorical_cause() -> No
     assert "categorical" in result.reasons[0].message
 
 
+def test_ambiguous_evidence_oracle_requires_distinct_hypotheses() -> None:
+    context = _context("ambiguous")
+    fixture = AmbiguousEvidenceFixture.for_context(context)
+    report = _ambiguous_report(context, fixture).model_copy(
+        update={"hypotheses": (Hypothesis(statement="The same cause."),) * 2}
+    )
+
+    result = QualityGate.evaluate(report, fixture.evidence_set, AmbiguousEvidenceOracle())
+
+    assert not result.approved
+    assert _codes(result) == ["scenario-criteria-not-met"]
+
+
 def _report(
     context: InvestigationContext, citation: EvidenceCitation | None
 ) -> InvestigationReport:
