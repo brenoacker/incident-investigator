@@ -248,6 +248,7 @@ def test_runner_executes_ambiguous_report_through_codex_adapter() -> None:
     assert any("mcp_servers.incident-mcp" in item for item in command)
     assert any("mcp_servers.operations-mcp" in item for item in command)
     assert all("knowledge-mcp" not in item and "source-mcp" not in item for item in command)
+    assert all("action" not in item.casefold() for item in command)
 
 
 def test_runner_rejects_events_from_another_run_without_evaluating_report() -> None:
