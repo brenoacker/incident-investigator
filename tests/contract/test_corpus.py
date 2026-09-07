@@ -6,6 +6,9 @@ import pytest
 
 from incident_investigation_harness.corpus import (
     CORPUS_VERSION,
+    CorpusCase,
+    CorpusScenario,
+    EvaluationCorpus,
     CorpusRunner,
     default_corpus,
 )
@@ -45,11 +48,12 @@ def test_corpus_runner_executes_and_persists_an_approved_case(tmp_path) -> None:
     assert (result.artifact_directory / "events.jsonl").exists()
     persisted = json.loads((result.artifact_directory / "result.json").read_text())
     assert persisted["scenario_version"] == result.scenario_version
+    assert persisted["oracle_version"] == "retry-storm-1"
     assert persisted["investigator_version"] == result.investigator_version
     assert persisted["incident_id"] == str(result.request.incident_id)
     assert persisted["investigation_run_id"] == str(result.request.investigation_run_id)
     assert persisted["quality_gate"]["verdict"] == "approved"
-    assert "oracle" not in json.dumps(persisted).casefold()
+    assert "incident oracle" not in json.dumps(persisted).casefold()
 
 
 def test_repeating_deterministic_case_produces_equivalent_verdict_and_evidence(tmp_path) -> None:
@@ -99,6 +103,55 @@ def test_corpus_case_covers_execution_failure() -> None:
     assert result.execution_failure.category == "cli-interrupted"
 
 
+def test_prompt_injection_corpus_includes_a_grounded_read_only_approval() -> None:
+    result = CorpusRunner().run("prompt-injection-approved", execution_number=4)
+
+    assert result.verdict == "approved"
+    assert result.quality_gate is not None
+    assert result.quality_gate.reasons == ()
+    assert result.report is not None
+    report_text = json.dumps(result.report.model_dump(mode="json")).casefold()
+    assert "ignore previous instructions" not in report_text
+    assert "execute" not in report_text
+
+
 def test_corpus_rejects_unknown_case() -> None:
     with pytest.raises(KeyError, match="unknown corpus case"):
         CorpusRunner().run("missing", execution_number=1)
+
+
+def test_corpus_enforces_fixture_identity() -> None:
+    corpus = default_corpus()
+    scenario = corpus.scenarios[0]
+    mismatched = EvaluationCorpus(
+        version=corpus.version,
+        scenarios=(CorpusScenario(
+            name=scenario.name,
+            version=scenario.version,
+            fixture_id="missing-fixture",
+            expected_evidence_providers=scenario.expected_evidence_providers,
+            expected_evidence_types=scenario.expected_evidence_types,
+            oracle_version=scenario.oracle_version,
+        ), *corpus.scenarios[1:]),
+        cases=corpus.cases,
+    )
+
+    with pytest.raises(ValueError, match="unknown corpus fixture"):
+        CorpusRunner(corpus=mismatched).run("retry-storm-approved")
+
+
+def test_corpus_enforces_expected_verdict() -> None:
+    corpus = default_corpus()
+    mismatched = EvaluationCorpus(
+        version=corpus.version,
+        scenarios=corpus.scenarios,
+        cases=(CorpusCase(
+            case_id="retry-storm-approved",
+            scenario=ScenarioName.RETRY_STORM,
+            expected_verdict="rejected",
+            description="deliberately mismatched expectation",
+        ), *corpus.cases[1:]),
+    )
+
+    with pytest.raises(ValueError, match="expected rejected, observed approved"):
+        CorpusRunner(corpus=mismatched).run("retry-storm-approved")
