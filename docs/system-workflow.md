@@ -116,6 +116,8 @@ flowchart TD
 
 The healthy scenario acts as the reference. The Quality Gate uses the scenario's comparison to check whether observed degradation exceeds the expected threshold; a single `429` is not enough. The `ambiguous-evidence` fixture intentionally exposes only incident and operational evidence, while withholding knowledge and source evidence so the investigator must state Calibrated Uncertainty.
 
+The implemented `prompt-injection` fixture includes a ticket/comment instruction that attempts to redirect the investigator to the Incident Oracle and to execute mitigation. The incident MCP marks that content as `Untrusted Evidence`; the investigator receives all four read-only Evidence Providers, while the runner audits denied capabilities and the Quality Gate requires both useful cited triage and a clean capability audit.
+
 ## 6. Preparing an Investigation Run
 
 An Investigation Run is an identifiable attempt to investigate an incident. The public `EvaluatedRunRunner.run` boundary accepts an `EvaluatedRunRequest` (scenario and both identifiers), invokes the configured `InvestigatorAdapter`, collects its `InvestigationReport` and scoped JSONL events, and then evaluates them with the external Quality Gate. An investigator failure is returned as an explicit execution failure and is never evaluated as an approval.

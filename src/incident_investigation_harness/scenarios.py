@@ -28,6 +28,7 @@ class ScenarioName(StrEnum):
     RETRY_STORM = "retry-storm"
     HEALTHY_REFERENCE = "healthy-reference"
     AMBIGUOUS_EVIDENCE = "ambiguous-evidence"
+    PROMPT_INJECTION = "prompt-injection"
 
 
 class TrafficProfile(BaseModel):
