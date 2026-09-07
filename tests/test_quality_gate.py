@@ -7,12 +7,14 @@ import pytest
 from incident_investigation_harness.context import InvestigationContext
 from incident_investigation_harness.evidence import EvidenceCitation
 from incident_investigation_harness.quality_gate import (
+    AmbiguousEvidenceOracle,
     EvidenceSet,
     IncidentOracle,
     QualityGate,
     QualityGateReasonCode,
     RetryStormOracle,
 )
+from incident_investigation_harness.fixtures import AmbiguousEvidenceFixture
 from incident_investigation_harness.report import (
     Confidence,
     EvidenceGap,
@@ -162,6 +164,69 @@ def test_retry_storm_oracle_rejects_mitigation_without_backoff_limit_and_jitter(
     assert _codes(result) == ["incomplete-mitigation"]
 
 
+def test_ambiguous_evidence_oracle_approves_calibrated_uncertainty() -> None:
+    context = _context("ambiguous")
+    fixture = AmbiguousEvidenceFixture.for_context(context)
+    report = _ambiguous_report(context, fixture)
+
+    result = QualityGate.evaluate(report, fixture.evidence_set, AmbiguousEvidenceOracle())
+
+    assert result.approved
+
+
+def test_ambiguous_fixture_declares_available_and_absent_evidence() -> None:
+    fixture = AmbiguousEvidenceFixture.for_context(_context("ambiguous"))
+
+    assert fixture.available_providers == {"incident-mcp", "operations-mcp"}
+    assert fixture.absent_providers == {"knowledge-mcp", "source-mcp"}
+    assert fixture.evidence_set.citations == fixture.citations
+
+
+def test_ambiguous_evidence_oracle_rejects_unsupported_categorical_cause() -> None:
+    context = _context("ambiguous")
+    fixture = AmbiguousEvidenceFixture.for_context(context)
+    report = _ambiguous_report(context, fixture).model_copy(
+        update={"probable_cause": Hypothesis(statement="The database caused the incident.")}
+    )
+
+    result = QualityGate.evaluate(report, fixture.evidence_set, AmbiguousEvidenceOracle())
+
+    assert not result.approved
+    assert _codes(result) == ["incompatible-conclusion"]
+    assert "categorical" in result.reasons[0].message
+
+
+def test_ambiguous_evidence_oracle_requires_distinct_hypotheses() -> None:
+    context = _context("ambiguous")
+    fixture = AmbiguousEvidenceFixture.for_context(context)
+    report = _ambiguous_report(context, fixture).model_copy(
+        update={"hypotheses": (Hypothesis(statement="The same cause."),) * 2}
+    )
+
+    result = QualityGate.evaluate(report, fixture.evidence_set, AmbiguousEvidenceOracle())
+
+    assert not result.approved
+    assert _codes(result) == ["scenario-criteria-not-met"]
+
+
+def test_ambiguous_evidence_oracle_requires_a_plausible_alternative() -> None:
+    context = _context("ambiguous")
+    fixture = AmbiguousEvidenceFixture.for_context(context)
+    report = _ambiguous_report(context, fixture).model_copy(
+        update={
+            "hypotheses": (
+                Hypothesis(statement="The provider caused the delay."),
+                Hypothesis(statement="The queue caused the delay."),
+            )
+        }
+    )
+
+    result = QualityGate.evaluate(report, fixture.evidence_set, AmbiguousEvidenceOracle())
+
+    assert not result.approved
+    assert _codes(result) == ["scenario-criteria-not-met"]
+
+
 def _report(
     context: InvestigationContext, citation: EvidenceCitation | None
 ) -> InvestigationReport:
@@ -245,6 +310,43 @@ def _retry_storm_fixture(context: InvestigationContext) -> EvidenceSet:
         context=context,
         citations=citations,
         resolvers=(Resolver(values),),
+    )
+
+
+def _ambiguous_report(
+    context: InvestigationContext, fixture: AmbiguousEvidenceFixture
+) -> InvestigationReport:
+    citation = next(iter(fixture.citations))
+    return InvestigationReport(
+        schema_version="1.0",
+        incident_id=context.incident_id,
+        investigation_run_id=context.investigation_run_id,
+        impact="Some notifications were delayed.",
+        timeline=(),
+        factual_claims=(
+            FactualClaim(
+                id="claim-1",
+                statement="The provider returned a rate-limit response.",
+                citations=(citation,),
+            ),
+        ),
+        hypotheses=(
+            Hypothesis(statement="A dependency rate limit may be involved."),
+            Hypothesis(statement="Queue contention is a plausible alternative."),
+        ),
+        confidence=Confidence(
+            level="low", rationale="The available evidence cannot distinguish the hypotheses."
+        ),
+        suggested_mitigation=Mitigation(
+            action="Collect provider response logs and queue metrics.",
+            rationale="That evidence would distinguish the competing hypotheses.",
+        ),
+        evidence_gaps=(
+            EvidenceGap(
+                description="The worker retry behavior is not observable.",
+                needed_evidence="Worker logs showing retry attempts and backoff",
+            ),
+        ),
     )
 
 

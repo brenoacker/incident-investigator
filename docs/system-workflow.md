@@ -43,7 +43,7 @@ The flows connect through evidence and the `incident_id` and `investigation_run_
 | Redis | Transports messages and represents the queue/backlog | Business flow |
 | `notification-worker` | Consumes messages and attempts notification delivery | Business flow |
 | `notification-provider` | Local dependency that accepts delivery or returns `429` | Business flow / scenario |
-| Scenarios and fixtures | Control traffic, failures and evidence for reproducibility | Setup / evaluation |
+| Scenarios and fixtures | Control traffic, failures and evidence for reproducibility, including deliberately ambiguous evidence | Setup / evaluation |
 | Codex CLI | Runs the investigation in an isolated workspace | Incident Triage |
 | Evidence Providers | Expose bounded evidence to Codex through MCP | Incident Triage |
 | Evaluated Run runner | Composes one identified investigation, collects its artifacts and invokes external evaluation | Incident Triage / Evaluation |
@@ -114,7 +114,7 @@ flowchart TD
     Latency --> Evidence[Operational evidence]
 ```
 
-The healthy scenario acts as the reference. The Quality Gate uses the scenario's comparison to check whether observed degradation exceeds the expected threshold; a single `429` is not enough.
+The healthy scenario acts as the reference. The Quality Gate uses the scenario's comparison to check whether observed degradation exceeds the expected threshold; a single `429` is not enough. The `ambiguous-evidence` fixture intentionally exposes only incident and operational evidence, while withholding knowledge and source evidence so the investigator must state Calibrated Uncertainty.
 
 ## 6. Preparing an Investigation Run
 
@@ -260,6 +260,8 @@ The final result can be:
 | Approved | The report is valid, traceable and meets the scenario criteria |
 | Rejected for quality | The report exists but fails schema, citation or scenario criteria |
 | Execution failure | Codex did not produce valid output or infrastructure failed |
+
+For the implemented `ambiguous-evidence` scenario, the Quality Gate approves a report with low confidence, at least one plausible alternative hypothesis, a relevant evidence gap and no probable cause. A categorical probable cause without the withheld evidence is rejected with an explicit incompatible-conclusion reason. Cited evidence must still resolve, and mitigation remains a recommendation only.
 
 An execution failure never becomes an approval because evidence is missing. Likewise, a convincing report without verifiable citations is not sufficient.
 

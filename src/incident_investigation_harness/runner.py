@@ -13,6 +13,7 @@ from incident_investigation_harness.isolation import (InvestigationEnvironment,
                                                       InvestigationSandbox,
                                                       IsolationProbeResult)
 from incident_investigation_harness.quality_gate import (EvidenceSet,
+                                                         AmbiguousEvidenceOracle,
                                                          IncidentOracle,
                                                          QualityGate,
                                                          QualityGateResult,
@@ -131,13 +132,13 @@ class EvaluatedRunRunner:
         self._investigator = investigator
         self._evidence_set = evidence_set
         self._evidence_set_factory = evidence_set_factory
-        self._oracle = oracle or IncidentOracle()
-        self._sandbox = sandbox or InvestigationSandbox()
+        self._oracle = oracle
+        self._sandbox = sandbox
 
     def run(self, request: EvaluatedRunRequest) -> EvaluatedRunResult:
         """Execute one run; investigator errors are explicit and never evaluated."""
         try:
-            environment = self._sandbox.prepare(request.context)
+            environment = self._sandbox_for(request).prepare(request.context)
             execution = self._investigator.investigate(request, environment)
             events = _validate_events(execution.events, request)
             evidence_set = self._get_evidence_set(request)
@@ -205,11 +206,22 @@ class EvaluatedRunRunner:
             raise ValueError("EvidenceSet context does not match the evaluated run")
         return evidence_set
 
+    def _sandbox_for(self, request: EvaluatedRunRequest) -> InvestigationSandbox:
+        if self._sandbox is not None:
+            return self._sandbox
+        if request.scenario == ScenarioName.AMBIGUOUS_EVIDENCE:
+            return InvestigationSandbox(
+                allowed_evidence_providers=("incident-mcp", "operations-mcp")
+            )
+        return InvestigationSandbox()
+
     def _get_oracle(self, request: EvaluatedRunRequest) -> IncidentOracle:
         if self._oracle is not None:
             return self._oracle
         if request.scenario == ScenarioName.RETRY_STORM:
             return RetryStormOracle()
+        if request.scenario == ScenarioName.AMBIGUOUS_EVIDENCE:
+            return AmbiguousEvidenceOracle()
         return IncidentOracle()
 
 

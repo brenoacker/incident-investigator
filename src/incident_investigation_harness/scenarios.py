@@ -27,6 +27,7 @@ from incident_investigation_harness.context import InvestigationContext
 class ScenarioName(StrEnum):
     RETRY_STORM = "retry-storm"
     HEALTHY_REFERENCE = "healthy-reference"
+    AMBIGUOUS_EVIDENCE = "ambiguous-evidence"
 
 
 class TrafficProfile(BaseModel):
