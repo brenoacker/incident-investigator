@@ -289,6 +289,15 @@ the run-level `manifest.json` records the correlated identifiers and verdicts. E
 run directories are never overwritten, so a second execution can be compared without
 mixing state or evidence.
 
+The deterministic versioned corpus is available through
+`incident_investigation_harness.corpus.CorpusRunner`. Corpus version `1.0` describes
+stable scenario versions, fixture identities, expected evidence shape and evaluator-only
+oracle versions. Its cases exercise approval, unsupported claims, invalid citations,
+incompatible conclusions and execution failures through the same public
+`EvaluatedRunRunner.run` boundary. Persisted corpus metadata includes corpus, scenario,
+fixture and investigator versions and both run identifiers; investigator artifacts never
+include the Incident Oracle.
+
 For the implemented `ambiguous-evidence` scenario, the Quality Gate approves a report with low confidence, at least one plausible alternative hypothesis, a relevant evidence gap and no probable cause. A categorical probable cause without the withheld evidence is rejected with an explicit incompatible-conclusion reason. Cited evidence must still resolve, and mitigation remains a recommendation only.
 
 An execution failure never becomes an approval because evidence is missing. Likewise, a convincing report without verifiable citations is not sufficient.
