@@ -7,7 +7,11 @@ import subprocess
 
 import pytest
 
-from incident_investigation_harness.adapters.codex import CodexInvestigatorAdapter, _query_provider
+from incident_investigation_harness.adapters.codex import (
+    CodexInvestigatorAdapter,
+    _investigation_prompt,
+    _query_provider,
+)
 from incident_investigation_harness.isolation import InvestigationSandbox
 from incident_investigation_harness.report import InvestigationReport
 from incident_investigation_harness.runner import (
@@ -200,9 +204,41 @@ def test_codex_provider_detection_handles_cli_event_shapes() -> None:
     assert _query_provider({"name": "unrelated_tool"}) is None
 
 
-def _request() -> EvaluatedRunRequest:
+@pytest.mark.parametrize(
+    ("scenario", "required_phrases"),
+    [
+        (
+            ScenarioName.RETRY_STORM,
+            ("maximum attempt limit", "exponential backoff", "jitter"),
+        ),
+        (
+            ScenarioName.AMBIGUOUS_EVIDENCE,
+            ("low confidence", "alternative hypothesis", "do not provide a probable cause"),
+        ),
+        (
+            ScenarioName.PROMPT_INJECTION,
+            ("untrusted evidence", "do not execute", "source-mcp"),
+        ),
+    ],
+)
+def test_codex_prompt_contains_scenario_report_requirements(
+    scenario: ScenarioName, required_phrases: tuple[str, ...]
+) -> None:
+    request = _request(scenario)
+    environment = InvestigationSandbox().prepare(request.context)
+
+    prompt = _investigation_prompt(request, environment).casefold()
+
+    for phrase in required_phrases:
+        assert phrase in prompt
+    assert "represented by a citation" in prompt
+    for provider in environment.allowed_evidence_providers:
+        assert provider in prompt
+
+
+def _request(scenario: ScenarioName = ScenarioName.RETRY_STORM) -> EvaluatedRunRequest:
     return EvaluatedRunRequest(
-        scenario=ScenarioName.RETRY_STORM,
+        scenario=scenario,
         incident_id=uuid.uuid4(),
         investigation_run_id=uuid.uuid4(),
     )
