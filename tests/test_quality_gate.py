@@ -209,6 +209,24 @@ def test_ambiguous_evidence_oracle_requires_distinct_hypotheses() -> None:
     assert _codes(result) == ["scenario-criteria-not-met"]
 
 
+def test_ambiguous_evidence_oracle_requires_a_plausible_alternative() -> None:
+    context = _context("ambiguous")
+    fixture = AmbiguousEvidenceFixture.for_context(context)
+    report = _ambiguous_report(context, fixture).model_copy(
+        update={
+            "hypotheses": (
+                Hypothesis(statement="The provider caused the delay."),
+                Hypothesis(statement="The queue caused the delay."),
+            )
+        }
+    )
+
+    result = QualityGate.evaluate(report, fixture.evidence_set, AmbiguousEvidenceOracle())
+
+    assert not result.approved
+    assert _codes(result) == ["scenario-criteria-not-met"]
+
+
 def _report(
     context: InvestigationContext, citation: EvidenceCitation | None
 ) -> InvestigationReport:

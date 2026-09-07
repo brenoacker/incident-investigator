@@ -179,6 +179,14 @@ class AmbiguousEvidenceOracle(IncidentOracle):
         "metric",
         "trace",
     )
+    alternative_terms: tuple[str, ...] = (
+        "alternative",
+        "plausible",
+        "possible",
+        "may",
+        "might",
+        "could",
+    )
 
     def evaluate_report(
         self,
@@ -197,7 +205,14 @@ class AmbiguousEvidenceOracle(IncidentOracle):
         distinct_hypotheses = {
             hypothesis.statement.casefold().strip() for hypothesis in report.hypotheses
         }
-        if len(distinct_hypotheses) < self.minimum_hypotheses:
+        has_plausible_alternative = any(
+            any(term in hypothesis.casefold() for term in self.alternative_terms)
+            for hypothesis in distinct_hypotheses
+        )
+        if (
+            len(distinct_hypotheses) < self.minimum_hypotheses
+            or not has_plausible_alternative
+        ):
             reasons.append(
                 QualityGateReason(
                     code="scenario-criteria-not-met",

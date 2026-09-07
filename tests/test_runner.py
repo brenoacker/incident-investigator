@@ -136,6 +136,10 @@ def test_runner_approves_an_ambiguous_run_with_calibrated_uncertainty() -> None:
                 "incident-mcp",
                 "operations-mcp",
             )
+            assert environment.can_write is False
+            assert environment.can_administer is False
+            assert environment.can_inject_failures is False
+            assert environment.can_evaluate is False
             citation = next(iter(fixture.citations))
             return InvestigatorExecution(
                 report=InvestigationReport(
