@@ -82,7 +82,66 @@ class RetryStormFixture:
         return cls.for_context(request.context)  # type: ignore[attr-defined]
 
 
+@dataclass(frozen=True)
+class AmbiguousEvidenceFixture:
+    """Run-scoped fixture with enough evidence to identify a problem, but not its cause."""
+
+    context: InvestigationContext
+    citations: frozenset[EvidenceCitation]
+    available_providers: frozenset[str]
+    absent_providers: frozenset[str]
+    evidence_set: EvidenceSet
+
+    @classmethod
+    def for_context(cls, context: InvestigationContext) -> "AmbiguousEvidenceFixture":
+        evidence = {
+            "incident-mcp": "The incident ticket reports delayed notification delivery.",
+            "operations-mcp": "A provider rate-limit response was observed during the delay.",
+        }
+        citations = frozenset(
+            EvidenceCitation(
+                provider=provider,  # type: ignore[arg-type]
+                incident_id=context.incident_id,
+                investigation_run_id=context.investigation_run_id,
+                evidence_type="ticket" if provider == "incident-mcp" else "operational-log",
+                evidence_id=uuid.uuid5(
+                    uuid.NAMESPACE_URL,
+                    f"incident-investigation-harness:ambiguous:{context.investigation_run_id}:{provider}",
+                ),
+            )
+            for provider in evidence
+        )
+        values = {citation: evidence[citation.provider] for citation in citations}
+        available_providers = frozenset(evidence)
+        return cls(
+            context=context,
+            citations=citations,
+            available_providers=available_providers,
+            absent_providers=frozenset(
+                {"knowledge-mcp", "source-mcp"} - available_providers
+            ),
+            evidence_set=EvidenceSet(
+                context=context,
+                citations=citations,
+                resolvers=(_AmbiguousEvidenceFixtureResolver(values),),
+            ),
+        )
+
+    @classmethod
+    def for_request(cls, request: object) -> "AmbiguousEvidenceFixture":
+        """Build from an EvaluatedRunRequest without coupling fixtures to the runner."""
+        return cls.for_context(request.context)  # type: ignore[attr-defined]
+
+
 class _RetryStormFixtureResolver:
+    def __init__(self, values: dict[EvidenceCitation, str]) -> None:
+        self._values = values
+
+    def resolve(self, citation: EvidenceCitation) -> object | None:
+        return self._values.get(citation)
+
+
+class _AmbiguousEvidenceFixtureResolver:
     def __init__(self, values: dict[EvidenceCitation, str]) -> None:
         self._values = values
 

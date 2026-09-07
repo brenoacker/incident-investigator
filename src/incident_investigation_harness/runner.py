@@ -13,6 +13,7 @@ from incident_investigation_harness.isolation import (InvestigationEnvironment,
                                                       InvestigationSandbox,
                                                       IsolationProbeResult)
 from incident_investigation_harness.quality_gate import (EvidenceSet,
+                                                         AmbiguousEvidenceOracle,
                                                          IncidentOracle,
                                                          QualityGate,
                                                          QualityGateResult,
@@ -131,7 +132,7 @@ class EvaluatedRunRunner:
         self._investigator = investigator
         self._evidence_set = evidence_set
         self._evidence_set_factory = evidence_set_factory
-        self._oracle = oracle or IncidentOracle()
+        self._oracle = oracle
         self._sandbox = sandbox or InvestigationSandbox()
 
     def run(self, request: EvaluatedRunRequest) -> EvaluatedRunResult:
@@ -210,6 +211,8 @@ class EvaluatedRunRunner:
             return self._oracle
         if request.scenario == ScenarioName.RETRY_STORM:
             return RetryStormOracle()
+        if request.scenario == ScenarioName.AMBIGUOUS_EVIDENCE:
+            return AmbiguousEvidenceOracle()
         return IncidentOracle()
 
 

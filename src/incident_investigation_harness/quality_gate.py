@@ -164,6 +164,65 @@ class RetryStormOracle(IncidentOracle):
         return tuple(reasons)
 
 
+class AmbiguousEvidenceOracle(IncidentOracle):
+    """Evaluator-only criteria for a run whose evidence cannot establish a cause."""
+
+    version: str = "ambiguous-evidence-1"
+    required_confidence: Literal["low"] = "low"
+    minimum_hypotheses: int = 2
+    relevant_gap_terms: tuple[str, ...] = (
+        "provider",
+        "retry",
+        "queue",
+        "worker",
+        "log",
+        "metric",
+        "trace",
+    )
+
+    def evaluate_report(
+        self,
+        report: InvestigationReport,
+        evidence_set: EvidenceSet,
+    ) -> tuple[QualityGateReason, ...]:
+        del evidence_set
+        reasons: list[QualityGateReason] = []
+        if report.confidence.level != self.required_confidence:
+            reasons.append(
+                QualityGateReason(
+                    code="scenario-criteria-not-met",
+                    message="ambiguous evidence requires low confidence",
+                )
+            )
+        if len(report.hypotheses) < self.minimum_hypotheses:
+            reasons.append(
+                QualityGateReason(
+                    code="scenario-criteria-not-met",
+                    message="ambiguous evidence requires at least one alternative hypothesis",
+                )
+            )
+        gap_text = " ".join(
+            f"{gap.description} {gap.needed_evidence}" for gap in report.evidence_gaps
+        ).casefold()
+        if not report.evidence_gaps or not any(
+            term in gap_text for term in self.relevant_gap_terms
+        ):
+            reasons.append(
+                QualityGateReason(
+                    code="scenario-criteria-not-met",
+                    message="report must request relevant next evidence for the uncertainty",
+                )
+            )
+        if report.probable_cause is not None:
+            reasons.append(
+                QualityGateReason(
+                    code="incompatible-conclusion",
+                    message="ambiguous evidence does not support a categorical probable cause",
+                )
+            )
+        return tuple(reasons)
+
+
 class QualityGateReason(BaseModel):
     model_config = ConfigDict(frozen=True)
 

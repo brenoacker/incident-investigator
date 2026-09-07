@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 
 from incident_investigation_harness.evidence import EvidenceCitation
+from incident_investigation_harness.fixtures import AmbiguousEvidenceFixture
 from incident_investigation_harness.isolation import (
     InvestigationEnvironment,
     InvestigationSandbox,
@@ -123,6 +124,57 @@ def test_quality_rejection_is_distinct_from_investigator_failure() -> None:
     assert result.execution_failure is None
 
 
+def test_runner_approves_an_ambiguous_run_with_calibrated_uncertainty() -> None:
+    request = _request(scenario=ScenarioName.AMBIGUOUS_EVIDENCE)
+    fixture = AmbiguousEvidenceFixture.for_request(request)
+
+    class ControlledInvestigator:
+        def investigate(
+            self, received: EvaluatedRunRequest, environment: InvestigationEnvironment
+        ) -> InvestigatorExecution:
+            del environment
+            citation = next(iter(fixture.citations))
+            return InvestigatorExecution(
+                report=InvestigationReport(
+                    schema_version="1.0",
+                    incident_id=received.incident_id,
+                    investigation_run_id=received.investigation_run_id,
+                    impact="Some notifications were delayed.",
+                    timeline=(),
+                    factual_claims=(FactualClaim(
+                        id="claim-1",
+                        statement="The provider returned a rate-limit response.",
+                        citations=(citation,),
+                    ),),
+                    hypotheses=(
+                        {"statement": "A dependency rate limit may be involved."},
+                        {"statement": "Queue contention is a plausible alternative."},
+                    ),
+                    confidence={"level": "low", "rationale": "The evidence is insufficient."},
+                    suggested_mitigation={
+                        "action": "Collect provider response logs.",
+                        "rationale": "They are the next relevant evidence.",
+                    },
+                    evidence_gaps=({
+                        "description": "Worker retry behavior is unknown.",
+                        "needed_evidence": "Worker retry logs",
+                    },),
+                )
+            )
+
+    result = EvaluatedRunRunner(
+        ControlledInvestigator(),
+        evidence_set_factory=lambda run: AmbiguousEvidenceFixture.for_request(
+            run
+        ).evidence_set,
+    ).run(request)
+
+    assert result.approved
+    assert result.report is not None
+    assert result.report.probable_cause is None
+    assert result.execution_failure is None
+
+
 def test_runner_rejects_events_from_another_run_without_evaluating_report() -> None:
     request = _request()
 
@@ -148,9 +200,11 @@ def test_runner_rejects_events_from_another_run_without_evaluating_report() -> N
     assert result.quality_gate is None
 
 
-def _request() -> EvaluatedRunRequest:
+def _request(
+    *, scenario: ScenarioName = ScenarioName.RETRY_STORM
+) -> EvaluatedRunRequest:
     return EvaluatedRunRequest(
-        scenario=ScenarioName.RETRY_STORM,
+        scenario=scenario,
         incident_id=uuid.uuid4(),
         investigation_run_id=uuid.uuid4(),
     )
