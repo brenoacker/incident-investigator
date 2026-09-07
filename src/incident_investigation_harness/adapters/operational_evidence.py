@@ -121,8 +121,7 @@ def build_operational_evidence_repository() -> OperationalEvidenceRepositoryFake
     context = _context("retry-storm", 1)
     other_context = _context("healthy-reference", 1)
     timestamp = datetime(2026, 1, 1, 0, 10, tzinfo=timezone.utc)
-    return OperationalEvidenceRepositoryFake(
-        logs=(
+    logs = [
             OperationalLog(
                 id=_id("log-retry-storm-429"),
                 investigation_context=context,
@@ -139,8 +138,8 @@ def build_operational_evidence_repository() -> OperationalEvidenceRepositoryFake
                 message="notification processing completed",
                 values={"status_code": 202, "attempts": 1},
             ),
-        ),
-        metrics=(
+    ]
+    metrics = [
             OperationalMetric(
                 id=_id("metric-retry-storm-attempts"),
                 investigation_context=context,
@@ -168,8 +167,8 @@ def build_operational_evidence_repository() -> OperationalEvidenceRepositoryFake
                 unit="work-units",
                 operation="notification-processing",
             ),
-        ),
-        traces=(
+    ]
+    traces = [
             OperationalTrace(
                 id=_id("trace-retry-storm"),
                 investigation_context=context,
@@ -179,7 +178,75 @@ def build_operational_evidence_repository() -> OperationalEvidenceRepositoryFake
                 status_code=429,
                 values={"attempts": 16, "backlog": 8, "p99": 16},
             ),
-        ),
+    ]
+    for scenario in ("retry-storm", "ambiguous-evidence", "prompt-injection"):
+        for execution_number in range(2, 11):
+            run_context = _context(scenario, execution_number)
+            logs.append(
+                OperationalLog(
+                    id=_id(f"log-{scenario}-429-{execution_number}"),
+                    investigation_context=run_context,
+                    timestamp=timestamp,
+                    level="WARN",
+                    message="notification-provider returned 429; queue latency increased",
+                    values={"status_code": 429, "attempts": 16},
+                )
+            )
+            metrics.extend(
+                (
+                    OperationalMetric(
+                        id=_id(f"metric-{scenario}-attempts-{execution_number}"),
+                        investigation_context=run_context,
+                        timestamp=timestamp,
+                        name="notification.attempts.total",
+                        value=16,
+                        unit="attempts",
+                        operation="notification-processing",
+                    ),
+                    OperationalMetric(
+                        id=_id(f"metric-{scenario}-backlog-{execution_number}"),
+                        investigation_context=run_context,
+                        timestamp=timestamp,
+                        name="notification.backlog",
+                        value=8,
+                        unit="messages",
+                        operation="notification-processing",
+                    ),
+                    OperationalMetric(
+                        id=_id(f"metric-{scenario}-p99-{execution_number}"),
+                        investigation_context=run_context,
+                        timestamp=timestamp,
+                        name="notification.latency.p99",
+                        value=16,
+                        unit="work-units",
+                        operation="notification-processing",
+                    ),
+                )
+            )
+            traces.append(
+                OperationalTrace(
+                    id=_id(f"trace-{scenario}-{execution_number}"),
+                    investigation_context=run_context,
+                    timestamp=timestamp,
+                    operation="notification-processing",
+                    duration_ms=16,
+                    status_code=429,
+                    values={"attempts": 16, "backlog": 8, "p99": 16},
+                )
+            )
+    ambiguous_context = _context("ambiguous-evidence", 1)
+    logs.append(
+        OperationalLog(
+            id=_id("log-ambiguous-evidence-429"),
+            investigation_context=ambiguous_context,
+            timestamp=timestamp,
+            level="WARN",
+            message="notification-provider returned 429",
+            values={"status_code": 429},
+        )
+    )
+    return OperationalEvidenceRepositoryFake(
+        logs=tuple(logs), metrics=tuple(metrics), traces=tuple(traces)
     )
 
 

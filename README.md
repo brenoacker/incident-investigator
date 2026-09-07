@@ -104,3 +104,55 @@ Every span carries the component, operation and (when available) `incident_id` a
 `investigation_run_id`. Prometheus labels contain only bounded values such as scenario,
 provider, operation, result and verdict; unique run identifiers are never metric labels.
 JSONL events and runner artifacts remain the authoritative run-scoped audit records.
+
+## Three minimum evaluations
+
+The reproducible evaluation path uses the Codex CLI, not the desktop application. The
+desktop is useful for dogfooding the MCPs and inspecting the local stack; the CLI is the
+evaluation executor and writes the audit artifacts.
+
+Start from a clean local environment:
+
+```powershell
+docker compose down -v
+docker compose up --build -d
+docker compose ps
+Invoke-WebRequest http://localhost:8000/health
+```
+
+Authenticate the Codex CLI in the host environment, then run all three minimum scenarios:
+
+```powershell
+$env:PYTHONPATH = "src"
+python -m incident_investigation_harness.evaluation --execution-number 1
+```
+
+The command runs `retry-storm`, `ambiguous-evidence` and `prompt-injection` through the
+read-only Codex adapter. Each scenario receives a distinct `incident_id` and
+`investigation_run_id`. Results are written under
+`artifacts/evaluations/run-1/<scenario>/` as `result.json`, `report.json` (when a report
+exists) and `events.jsonl`; `manifest.json` records the run identities and verdicts.
+The command refuses to overwrite an existing run directory. To demonstrate isolation,
+repeat with a new execution number and compare the two manifests:
+
+```powershell
+python -m incident_investigation_harness.evaluation --execution-number 2
+Compare-Object (Get-Content artifacts/evaluations/run-1/manifest.json) `
+               (Get-Content artifacts/evaluations/run-2/manifest.json)
+```
+
+Execution numbers `1` through `10` are provisioned in the local fixtures so repeated
+evaluations keep the same scenario evidence shape while using a new run identity.
+
+Inspect correlation in Jaeger by searching the `incident_id` or
+`investigation_run_id` span attribute. In Prometheus use the bounded run and provider
+metrics; in Grafana open the provisioned `Investigation Harness` dashboard for duration,
+failures, Quality Gate activity, notification backlog and Retry Storm retries. The
+identifiers intentionally remain span attributes rather than metric labels.
+
+For a clean retry, remove the local artifacts and Compose volume before starting again:
+
+```powershell
+Remove-Item -Recurse -Force artifacts/evaluations -ErrorAction SilentlyContinue
+docker compose down -v
+```

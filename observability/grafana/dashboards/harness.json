@@ -4,6 +4,8 @@
   "panels": [
     {"type":"timeseries","title":"Investigation run duration","targets":[{"expr":"histogram_quantile(0.95, sum(rate(investigation_run_duration_bucket[5m])) by (le))"}],"gridPos":{"h":8,"w":12,"x":0,"y":0}},
     {"type":"timeseries","title":"Runs and failures","targets":[{"expr":"sum(rate(investigation_runs_completed_total[5m]))","legendFormat":"completed"},{"expr":"sum(rate(investigation_runs_failed_total[5m]))","legendFormat":"failed"}],"gridPos":{"h":8,"w":12,"x":12,"y":0}},
-    {"type":"timeseries","title":"Retry Storm signals","targets":[{"expr":"sum(rate(notification_retries_total[5m]))","legendFormat":"retries"},{"expr":"notification_backlog","legendFormat":"backlog"}],"gridPos":{"h":8,"w":24,"x":0,"y":8}}
+    {"type":"timeseries","title":"MCP queries","targets":[{"expr":"sum(rate(evidence_provider_queries_total[5m])) by (provider)","legendFormat":"{{provider}}"},{"expr":"sum(rate(evidence_provider_query_failures_total[5m])) by (provider)","legendFormat":"{{provider}} failures"}],"gridPos":{"h":8,"w":12,"x":0,"y":8}},
+    {"type":"timeseries","title":"Quality Gate verdicts","targets":[{"expr":"sum(rate(quality_gate_duration_count[5m])) by (verdict)","legendFormat":"{{verdict}}"}],"gridPos":{"h":8,"w":12,"x":12,"y":8}},
+    {"type":"timeseries","title":"Retry Storm signals","targets":[{"expr":"sum(rate(notification_retries_total[5m]))","legendFormat":"retries"},{"expr":"notification_backlog","legendFormat":"backlog"}],"gridPos":{"h":8,"w":24,"x":0,"y":16}}
   ]
 }
