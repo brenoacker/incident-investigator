@@ -154,6 +154,15 @@ class CodexInvestigatorAdapter:
         ]
         for name, url in servers.items():
             command.extend(["--config", f'mcp_servers.{name}.url={json.dumps(url)}'])
+            # Headless Codex cannot ask a human to approve MCP calls. This
+            # approval applies only to the explicitly configured MCP server;
+            # the process remains in the read-only sandbox above.
+            command.extend(
+                [
+                    "--config",
+                    f'mcp_servers.{name}.default_tools_approval_mode="approve"',
+                ]
+            )
         command.append("-")
         return command
 

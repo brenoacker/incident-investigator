@@ -59,6 +59,10 @@ def test_codex_adapter_hands_off_exact_context_and_allowlisted_mcp_config() -> N
     assert str(request.investigation_run_id) in prompt
     assert "incident-mcp" in prompt
     assert any("incident-mcp" in item for item in command)
+    assert any(
+        'mcp_servers.incident-mcp.default_tools_approval_mode="approve"' in item
+        for item in command
+    )
     assert all("operations-mcp" not in item for item in command)
     assert execution.report == _report(request)
     assert {event.event_type for event in execution.events} == {
