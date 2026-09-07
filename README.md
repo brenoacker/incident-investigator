@@ -1,6 +1,6 @@
 # Incident Investigation Harness
 
-Local, reproducible foundation for the Incident Investigation Harness. The service exposes a ticket API and persists records in local PostgreSQL; the worker, MCPs and other flows are being added incrementally.
+Local, reproducible Incident Investigation Harness. The service exposes a ticket API, read-only Evidence Providers and correlated OpenTelemetry traces/metrics for each Investigation Run.
 
 ## Prerequisites
 
@@ -50,7 +50,7 @@ Without `DATABASE_URL`, the integration test is marked `skipped`; the fast tests
 
 ## Docker Compose environment
 
-Start the local API and PostgreSQL:
+Start the local API, Evidence Providers and the local observability stack:
 
 ```sh
 docker compose up --build -d
@@ -64,6 +64,17 @@ curl http://localhost:8000/health
 ```
 
 The service should be `healthy` and the endpoint should return `{"status":"ok"}`.
+
+The local observability endpoints are Jaeger (`http://localhost:16686`), Prometheus
+(`http://localhost:9090`) and Grafana (`http://localhost:3000`, anonymous read access).
+Grafana provisions the `Investigation Harness` dashboard automatically. The harness
+also exposes Prometheus-compatible metrics at `http://localhost:8000/metrics`.
+
+The application exports OTLP traces and metrics to the Collector at `otel-collector:4317`.
+When the Collector, Jaeger or Prometheus is unavailable, SDK export retries/drop events
+in the background; business operations, Evidence Providers and the Quality Gate continue.
+The Compose stack is intentionally local and ephemeral except for the PostgreSQL volume.
+Use `docker compose down -v` to remove that volume when resetting local data.
 
 Create and query a ticket:
 
@@ -88,3 +99,8 @@ To stop the environment:
 ```sh
 docker compose down
 ```
+
+Every span carries the component, operation and (when available) `incident_id` and
+`investigation_run_id`. Prometheus labels contain only bounded values such as scenario,
+provider, operation, result and verdict; unique run identifiers are never metric labels.
+JSONL events and runner artifacts remain the authoritative run-scoped audit records.

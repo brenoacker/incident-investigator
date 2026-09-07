@@ -13,12 +13,14 @@ from incident_investigation_harness.knowledge_evidence import (
     KnowledgeDocumentType,
     KnowledgeEvidenceQuery,
 )
+from incident_investigation_harness.telemetry import instrument_evidence_query
 
 mcp = FastMCP("knowledge-mcp", host="0.0.0.0", port=8003)
 repository = build_knowledge_evidence_repository()
 
 
 @mcp.tool()
+@instrument_evidence_query("knowledge-mcp", "query")
 def query_knowledge_evidence(
     incident_id: str,
     investigation_run_id: str,
@@ -46,6 +48,7 @@ def query_knowledge_evidence(
 
 
 @mcp.tool()
+@instrument_evidence_query("knowledge-mcp", "resolve-citation")
 def resolve_knowledge_evidence_citation(
     provider: str,
     incident_id: str,

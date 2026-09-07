@@ -13,12 +13,14 @@ from incident_investigation_harness.source_evidence import (
     SourceEvidenceQuery,
     SourceEvidenceType,
 )
+from incident_investigation_harness.telemetry import instrument_evidence_query
 
 mcp = FastMCP("source-mcp", host="0.0.0.0", port=8004)
 repository = build_source_evidence_repository()
 
 
 @mcp.tool()
+@instrument_evidence_query("source-mcp", "query")
 def query_source_evidence(
     incident_id: str,
     investigation_run_id: str,
@@ -50,6 +52,7 @@ def query_source_evidence(
 
 
 @mcp.tool()
+@instrument_evidence_query("source-mcp", "resolve-citation")
 def resolve_source_evidence_citation(
     provider: str,
     incident_id: str,

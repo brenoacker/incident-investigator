@@ -49,7 +49,7 @@ The flows connect through evidence and the `incident_id` and `investigation_run_
 | Evaluated Run runner | Composes one identified investigation, collects its artifacts and invokes external evaluation | Incident Triage / Evaluation |
 | Quality Gate | Validates the report without relying on subjective model judgment | Evaluation |
 | Incident Oracle | Stores the private reference and scenario criteria | Evaluation, outside Codex's reach |
-| Local observability | Records events, logs, spans, metrics and results | Audit |
+| Local observability | Records events, logs, spans, metrics and results through the OpenTelemetry Collector, Jaeger, Prometheus and Grafana stack | Audit |
 
 ## 4. Business flow: ticket to notification
 
@@ -272,6 +272,15 @@ An execution failure never becomes an approval because evidence is missing. Like
 ## 11. Observability and audit
 
 The components record events and operational signals so that an Investigation Run can be understood afterward. Correlation uses the run identifiers.
+
+The local Compose stack sends OTLP spans and metrics to the OpenTelemetry Collector.
+The Collector forwards traces to Jaeger and exposes aggregated metrics for Prometheus;
+Grafana provisions a dashboard for run duration/failures, notification backlog and
+Retry Storm retries. The API exposes `/metrics` for scrape-based development checks.
+Exporter failures are deliberately non-fatal: the business flow, Evidence Providers
+and Quality Gate continue and JSONL/artifact audit remains available. Metrics use only
+bounded labels; `incident_id` and `investigation_run_id` are span/event correlation
+attributes, never Prometheus labels.
 
 ```mermaid
 flowchart LR

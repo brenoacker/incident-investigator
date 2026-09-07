@@ -8,6 +8,7 @@ from incident_investigation_harness.evidence import (EvidenceCitation,
                                                      IncidentEvidenceQuery)
 from incident_investigation_harness.fixtures import \
     build_incident_evidence_repository
+from incident_investigation_harness.telemetry import instrument_evidence_query
 
 mcp = FastMCP("incident-mcp", host="0.0.0.0", port=8001)
 
@@ -15,6 +16,7 @@ repository = build_incident_evidence_repository()
 
 
 @mcp.tool()
+@instrument_evidence_query("incident-mcp", "query")
 def query_incident_evidence(
     incident_id: str,
     investigation_run_id: str,
@@ -39,6 +41,7 @@ def query_incident_evidence(
     return response.model_dump(mode="json")
 
 @mcp.tool()
+@instrument_evidence_query("incident-mcp", "resolve-citation")
 def resolve_evidence_citation(
     provider: str,
     incident_id: str,

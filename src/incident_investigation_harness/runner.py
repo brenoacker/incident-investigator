@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from time import perf_counter
 from dataclasses import dataclass
 from typing import Callable, Literal, Mapping, Protocol
 
@@ -21,6 +22,7 @@ from incident_investigation_harness.quality_gate import (EvidenceSet,
                                                          RetryStormOracle)
 from incident_investigation_harness.report import InvestigationReport
 from incident_investigation_harness.scenarios import ScenarioName
+from incident_investigation_harness.telemetry import span, telemetry
 
 
 class EvaluatedRunRequest(BaseModel):
@@ -206,64 +208,67 @@ class EvaluatedRunRunner:
 
     def run(self, request: EvaluatedRunRequest) -> EvaluatedRunResult:
         """Execute one run; investigator errors are explicit and never evaluated."""
-        self._artifact_store.start(request.context)
-        try:
-            environment = self._sandbox_for(request).prepare(request.context)
-            execution = self._investigator.investigate(request, environment)
-            events = _validate_events(execution.events, request)
-            self._artifact_store.record(_events_artifact(request.context, events))
-            self._artifact_store.record(_report_artifact(request.context, execution.report))
-            evidence_set = self._get_evidence_set(request)
-            self._artifact_store.record(_evidence_artifact(request.context, evidence_set))
-            quality_gate = QualityGate.evaluate(
-                execution.report,
-                evidence_set,
-                self._get_oracle(request),
-                events=events,
-                environment=environment,
-            )
-        except InvestigatorExecutionFailure as error:
+        started = perf_counter()
+        telemetry.runs_started.add(1, {"scenario": request.scenario.value})
+        with span(
+            "evaluated-run",
+            context=request.context,
+            component="runner",
+            operation="run",
+            scenario=request.scenario.value,
+        ):
             try:
-                events = _validate_events(error.events, request)
-            except ValueError:
-                events = ()
-            if events:
-                self._artifact_store.record(_events_artifact(request.context, events))
-            return EvaluatedRunResult(
-                request=request,
-                report=None,
-                events=events,
-                quality_gate=None,
-                execution_failure=ExecutionFailure(
-                    category=_failure_category(error.category),
-                    cause=str(error) or "unknown error",
+                self._artifact_store.start(request.context)
+                try:
+                    environment = self._sandbox_for(request).prepare(request.context)
+                    execution = self._investigator.investigate(request, environment)
+                    events = _validate_events(execution.events, request)
+                    self._artifact_store.record(_events_artifact(request.context, events))
+                    self._artifact_store.record(_report_artifact(request.context, execution.report))
+                    evidence_set = self._get_evidence_set(request)
+                    self._artifact_store.record(_evidence_artifact(request.context, evidence_set))
+                    quality_gate = QualityGate.evaluate(
+                        execution.report,
+                        evidence_set,
+                        self._get_oracle(request),
+                        events=events,
+                        environment=environment,
+                    )
+                except InvestigatorExecutionFailure as error:
+                    try:
+                        events = _validate_events(error.events, request)
+                    except ValueError:
+                        events = ()
+                    if events:
+                        self._artifact_store.record(_events_artifact(request.context, events))
+                    telemetry.runs_failed.add(1, {"scenario": request.scenario.value, "category": _failure_category(error.category)})
+                    return EvaluatedRunResult(
+                        request=request, report=None, events=events, quality_gate=None,
+                        execution_failure=ExecutionFailure(
+                            category=_failure_category(error.category), cause=str(error) or "unknown error",
+                            artifacts=self._artifact_store.for_run(request.context),
+                        ), isolation_probes=(), artifacts=self._artifact_store.for_run(request.context),
+                    )
+                except Exception as error:  # boundary converts adapter failures to a result
+                    telemetry.runs_failed.add(1, {"scenario": request.scenario.value, "category": "runner-error"})
+                    return EvaluatedRunResult(
+                        request=request, report=None, events=(), quality_gate=None,
+                        execution_failure=ExecutionFailure(
+                            category="runner-error", cause=str(error) or "unknown error",
+                            artifacts=self._artifact_store.for_run(request.context),
+                        ), isolation_probes=(),
+                    )
+                telemetry.runs_completed.add(1, {"scenario": request.scenario.value, "verdict": quality_gate.verdict})
+                return EvaluatedRunResult(
+                    request=request, report=execution.report, events=events,
+                    quality_gate=quality_gate, execution_failure=None,
+                    isolation_probes=environment.isolation_probes,
                     artifacts=self._artifact_store.for_run(request.context),
-                ),
-                isolation_probes=(),
-                artifacts=self._artifact_store.for_run(request.context),
-            )
-        except Exception as error:  # boundary converts adapter failures to a result
-            return EvaluatedRunResult(
-                request=request,
-                report=None,
-                events=(),
-                quality_gate=None,
-                execution_failure=ExecutionFailure(
-                    category="runner-error",
-                    cause=str(error) or "unknown error",
-                    artifacts=self._artifact_store.for_run(request.context),
-                ),
-                isolation_probes=(),
-            )
-        return EvaluatedRunResult(
-            request=request,
-            report=execution.report,
-            events=events,
-            quality_gate=quality_gate,
-            execution_failure=None,
-            isolation_probes=environment.isolation_probes,
-            artifacts=self._artifact_store.for_run(request.context),
-        )
+                )
+            finally:
+                telemetry.run_duration.record(
+                    perf_counter() - started, {"scenario": request.scenario.value}
+                )
 
     def _get_evidence_set(self, request: EvaluatedRunRequest) -> EvidenceSet:
         if self._evidence_set_factory is not None:
