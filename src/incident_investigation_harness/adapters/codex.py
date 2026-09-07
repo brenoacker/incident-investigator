@@ -13,11 +13,8 @@ from typing import Any, cast
 from incident_investigation_harness.isolation import InvestigationEnvironment
 from incident_investigation_harness.report import InvestigationReport
 from incident_investigation_harness.runner import (
-    EvaluatedRunRequest,
-    InvestigationEvent,
-    InvestigatorExecution,
-    InvestigatorExecutionFailure,
-)
+    EvaluatedRunRequest, InvestigationEvent, InvestigatorExecution,
+    InvestigatorExecutionFailure)
 
 CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
 
@@ -239,9 +236,22 @@ def _child_environment() -> dict[str, str]:
 
 
 def _report_schema() -> dict[str, Any]:
-    from incident_investigation_harness.report import InvestigationReport
+    schema = InvestigationReport.model_json_schema()
+    _close_object_schemas(schema)
+    return schema
 
-    return InvestigationReport.model_json_schema()
+
+def _close_object_schemas(value: Any) -> None:
+    if isinstance(value, dict):
+        if value.get("type") == "object" or "properties" in value:
+            value["additionalProperties"] = False
+            if isinstance(value.get("properties"), dict):
+                value["required"] = list(value["properties"])
+        for child in value.values():
+            _close_object_schemas(child)
+    elif isinstance(value, list):
+        for child in value:
+            _close_object_schemas(child)
 
 
 def _load_report(path: Path) -> InvestigationReport:

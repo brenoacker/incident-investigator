@@ -9,17 +9,14 @@ from typing import Callable, Mapping, Protocol
 from pydantic import BaseModel, ConfigDict, Field
 
 from incident_investigation_harness.context import InvestigationContext
-from incident_investigation_harness.isolation import (
-    InvestigationEnvironment,
-    InvestigationSandbox,
-    IsolationProbeResult,
-)
-from incident_investigation_harness.quality_gate import (
-    EvidenceSet,
-    IncidentOracle,
-    QualityGate,
-    QualityGateResult,
-)
+from incident_investigation_harness.isolation import (InvestigationEnvironment,
+                                                      InvestigationSandbox,
+                                                      IsolationProbeResult)
+from incident_investigation_harness.quality_gate import (EvidenceSet,
+                                                         IncidentOracle,
+                                                         QualityGate,
+                                                         QualityGateResult,
+                                                         RetryStormOracle)
 from incident_investigation_harness.report import InvestigationReport
 from incident_investigation_harness.scenarios import ScenarioName
 
@@ -145,7 +142,22 @@ class EvaluatedRunRunner:
             events = _validate_events(execution.events, request)
             evidence_set = self._get_evidence_set(request)
             quality_gate = QualityGate.evaluate(
-                execution.report, evidence_set, self._oracle
+                execution.report, evidence_set, self._get_oracle(request)
+            )
+        except InvestigatorExecutionFailure as error:
+            try:
+                events = _validate_events(error.events, request)
+            except ValueError:
+                events = ()
+            return EvaluatedRunResult(
+                request=request,
+                report=None,
+                events=events,
+                quality_gate=None,
+                execution_failure=ExecutionFailure(
+                    error_type=type(error).__name__, message=str(error) or "unknown error"
+                ),
+                isolation_probes=(),
             )
         except InvestigatorExecutionFailure as error:
             try:
@@ -192,6 +204,13 @@ class EvaluatedRunRunner:
         if evidence_set.context != request.context:
             raise ValueError("EvidenceSet context does not match the evaluated run")
         return evidence_set
+
+    def _get_oracle(self, request: EvaluatedRunRequest) -> IncidentOracle:
+        if self._oracle is not None:
+            return self._oracle
+        if request.scenario == ScenarioName.RETRY_STORM:
+            return RetryStormOracle()
+        return IncidentOracle()
 
 
 def _validate_events(
