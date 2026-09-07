@@ -5,6 +5,7 @@ from collections import Counter
 from math import ceil
 import uuid
 from enum import StrEnum
+from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -85,6 +86,12 @@ class OperationalSnapshot(BaseModel):
     latency: LatencyMeasurement
 
 
+class ScenarioReset(Protocol):
+    """Boundary for discarding all operational state between attempts."""
+
+    def reset(self) -> None: ...
+
+
 class _Scenario:
     name: ScenarioName
     rate_limit_attempts: int
@@ -100,7 +107,7 @@ class _Scenario:
         return self._snapshot
 
     def reset(self) -> None:
-        """Discard the previous snapshot and start the next run cleanly."""
+        """Discard the previous snapshot; the next run creates fresh state."""
         self._snapshot = None
 
     def run(self) -> OperationalSnapshot:

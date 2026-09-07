@@ -120,7 +120,7 @@ The implemented `prompt-injection` fixture includes a ticket/comment instruction
 
 ## 6. Preparing an Investigation Run
 
-An Investigation Run is an identifiable attempt to investigate an incident. The public `EvaluatedRunRunner.run` boundary accepts an `EvaluatedRunRequest` (scenario and both identifiers), invokes the configured `InvestigatorAdapter`, collects its `InvestigationReport` and scoped JSONL events, and then evaluates them with the external Quality Gate. An investigator failure is returned as an explicit execution failure and is never evaluated as an approval.
+An Investigation Run is an identifiable attempt to investigate an incident. The public `EvaluatedRunRunner.run` boundary accepts an `EvaluatedRunRequest` (scenario and both identifiers), starts a fresh `RunArtifactStore` bucket for that identity, invokes the configured `InvestigatorAdapter`, collects its `InvestigationReport`, scoped JSONL events and citation metadata, and then evaluates them with the external Quality Gate. Provider unavailability, CLI interruption, invalid output and missing reports have explicit `ExecutionFailure` categories. A failure preserves only safe, run-scoped artifacts and is never evaluated as an approval.
 
 ```mermaid
 flowchart TD
@@ -254,6 +254,8 @@ flowchart TD
     Criteria -->|yes| Approve[Approved]
     Criteria -->|no| Reject4[Rejected with reasons]
 ```
+
+Artifacts are keyed by the exact `incident_id` and `investigation_run_id` pair. A reused run identity starts with an empty bucket, and artifacts from another run cannot be returned. The store contains report, event and citation metadata only; the Incident Oracle is evaluator-only and is never copied into artifacts.
 
 The final result can be:
 
