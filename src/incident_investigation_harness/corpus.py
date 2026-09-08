@@ -7,7 +7,7 @@ import json
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, cast
+from typing import Callable, Literal, cast
 
 from incident_investigation_harness.fixtures import (
     AmbiguousEvidenceFixture,
@@ -40,6 +40,7 @@ from incident_investigation_harness.runner import (
     InvestigatorExecution,
     InvestigatorExecutionFailure,
     EvaluatedRunRunner,
+    InvestigatorAdapter,
 )
 from incident_investigation_harness.scenarios import ScenarioName
 
@@ -142,16 +143,22 @@ class CorpusRunner:
         corpus: EvaluationCorpus | None = None,
         output_dir: Path | None = None,
         investigator_version: str = "corpus-investigator-1",
+        investigator_factory: Callable[[CorpusCase, Fixture], InvestigatorAdapter] | None = None,
+        run_identity: str = "default",
+        enforce_expected_verdict: bool = True,
     ) -> None:
         self.corpus = corpus or default_corpus()
         self.output_dir = output_dir
         self.investigator_version = investigator_version
+        self._investigator_factory = investigator_factory
+        self._run_identity = run_identity
+        self._enforce_expected_verdict = enforce_expected_verdict
 
     def run(self, case_id: str, *, execution_number: int = 1) -> CorpusRunResult:
         case = self.corpus.case(case_id)
         if execution_number < 1:
             raise ValueError("execution_number must be positive")
-        request = _request_for(case, execution_number)
+        request = _request_for(case, execution_number, self._run_identity)
         scenario = self.corpus.scenario(case.scenario)
         fixture = _fixture_for(request, scenario.fixture_id)
         _validate_fixture_shape(fixture, scenario)
@@ -159,12 +166,14 @@ class CorpusRunner:
         if oracle.version != scenario.oracle_version:
             raise ValueError(f"oracle version does not match scenario {case.scenario.value}")
         runner = EvaluatedRunRunner(
-            CorpusInvestigatorFake(case.case_id, fixture),
+            self._investigator_factory(case, fixture)
+            if self._investigator_factory is not None
+            else CorpusInvestigatorFake(case.case_id, fixture),
             evidence_set=fixture.evidence_set,
             oracle=oracle,
         )
         evaluated_run = runner.run(request)
-        if evaluated_run.verdict != case.expected_verdict:
+        if self._enforce_expected_verdict and evaluated_run.verdict != case.expected_verdict:
             raise ValueError(
                 f"corpus case {case.case_id} expected {case.expected_verdict}, "
                 f"observed {evaluated_run.verdict}"
@@ -268,11 +277,11 @@ def default_corpus() -> EvaluationCorpus:
     )
 
 
-def _request_for(case: CorpusCase, execution_number: int) -> EvaluatedRunRequest:
+def _request_for(case: CorpusCase, execution_number: int, run_identity: str = "default") -> EvaluatedRunRequest:
     return EvaluatedRunRequest(
         scenario=case.scenario,
         incident_id=uuid.uuid5(CORPUS_NAMESPACE, f"incident:{case.scenario.value}"),
-        investigation_run_id=uuid.uuid5(CORPUS_NAMESPACE, f"run:{case.case_id}:{execution_number}"),
+        investigation_run_id=uuid.uuid5(CORPUS_NAMESPACE, f"run:{run_identity}:{case.case_id}:{execution_number}"),
     )
 
 
