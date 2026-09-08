@@ -53,6 +53,22 @@ class InvestigationEvent(BaseModel):
     payload: Mapping[str, object] = Field(default_factory=dict)
 
 
+class InvestigatorUsage(BaseModel):
+    """Optional usage measurements reported by an investigator adapter."""
+
+    model_config = ConfigDict(frozen=True)
+
+    input_tokens: int | None = Field(default=None, ge=0)
+    output_tokens: int | None = Field(default=None, ge=0)
+    estimated_cost: float | None = Field(default=None, ge=0)
+
+    @property
+    def total_tokens(self) -> int | None:
+        if self.input_tokens is None or self.output_tokens is None:
+            return None
+        return self.input_tokens + self.output_tokens
+
+
 class InvestigatorExecution(BaseModel):
     """The report and audit events collected from an investigator."""
 
@@ -60,6 +76,7 @@ class InvestigatorExecution(BaseModel):
 
     report: InvestigationReport
     events: tuple[InvestigationEvent, ...] = ()
+    usage: InvestigatorUsage | None = None
 
 
 class InvestigatorExecutionFailure(RuntimeError):
@@ -163,6 +180,8 @@ class EvaluatedRunResult:
     execution_failure: ExecutionFailure | None
     isolation_probes: tuple[IsolationProbeResult, ...]
     artifacts: tuple[RunArtifact, ...] = ()
+    duration_seconds: float = 0.0
+    usage: InvestigatorUsage | None = None
 
     @property
     def approved(self) -> bool:
@@ -248,6 +267,7 @@ class EvaluatedRunRunner:
                             category=_failure_category(error.category), cause=str(error) or "unknown error",
                             artifacts=self._artifact_store.for_run(request.context),
                         ), isolation_probes=(), artifacts=self._artifact_store.for_run(request.context),
+                        duration_seconds=perf_counter() - started,
                     )
                 except Exception as error:  # boundary converts adapter failures to a result
                     telemetry.runs_failed.add(1, {"scenario": request.scenario.value, "category": "runner-error"})
@@ -257,6 +277,7 @@ class EvaluatedRunRunner:
                             category="runner-error", cause=str(error) or "unknown error",
                             artifacts=self._artifact_store.for_run(request.context),
                         ), isolation_probes=(),
+                        duration_seconds=perf_counter() - started,
                     )
                 telemetry.runs_completed.add(1, {"scenario": request.scenario.value, "verdict": quality_gate.verdict})
                 return EvaluatedRunResult(
@@ -264,6 +285,8 @@ class EvaluatedRunRunner:
                     quality_gate=quality_gate, execution_failure=None,
                     isolation_probes=environment.isolation_probes,
                     artifacts=self._artifact_store.for_run(request.context),
+                    duration_seconds=perf_counter() - started,
+                    usage=execution.usage,
                 )
             finally:
                 telemetry.run_duration.record(

@@ -298,6 +298,15 @@ incompatible conclusions and execution failures through the same public
 fixture and investigator versions and both run identifiers; investigator artifacts never
 include the Incident Oracle.
 
+The `incident_investigation_harness.comparison.ComparisonRunner` executes every case
+in a named corpus once per `InvestigatorConfiguration`. Candidates receive equivalent
+scenario and incident inputs but distinct `investigation_run_id` values, so their
+artifacts and evidence cannot mix. Each candidate result keeps approved, rejected and
+execution-failure counts separate, records citation validity and scenario-criteria
+status, and includes elapsed latency plus input/output token and estimated-cost
+measurements when an investigator supplies them. A comparison can flag a candidate
+below its quality threshold or slower than a named reference configuration.
+
 For the implemented `ambiguous-evidence` scenario, the Quality Gate approves a report with low confidence, at least one plausible alternative hypothesis, a relevant evidence gap and no probable cause. A categorical probable cause without the withheld evidence is rejected with an explicit incompatible-conclusion reason. Cited evidence must still resolve, and mitigation remains a recommendation only.
 
 An execution failure never becomes an approval because evidence is missing. Likewise, a convincing report without verifiable citations is not sufficient.

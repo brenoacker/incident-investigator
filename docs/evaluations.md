@@ -357,3 +357,14 @@ RUN_CODEX_EVAL=1 python -m pytest tests/evals -m eval --no-cov
 ```
 
 The three minimum evaluations described in this document are run through the evaluation CLI, not through the default CI test command.
+
+## Comparing investigator configurations
+
+Use `ComparisonRunner` with a `ComparisonRequest` naming corpus version `1.0` and
+the candidate configuration names. The runner evaluates every corpus case for each
+candidate with isolated run identifiers. `CandidateResult` preserves the three
+outcomes separately and reports quality score, citation validity, scenario-criteria
+status, latency, and optional token/cost measurements. Set `quality_threshold` and
+`reference_configuration` to report quality or latency regressions. The deterministic
+comparison contract is covered by `tests/contract/test_comparison.py`; live Codex
+configurations can provide usage measurements through `InvestigatorExecution.usage`.
