@@ -189,6 +189,7 @@ class PostgresKnowledgeEvidenceAdapter:  # pragma: no cover - exercised by Postg
                 SELECT passage_id, document_id, revision_id, path, title, document_type, passage_text, ordinal
                 FROM knowledge_passages p JOIN knowledge_documents d USING (document_id)
                 WHERE p.passage_id = %s AND d.authorized
+                  AND d.current_revision_id = p.revision_id
                   AND EXISTS (SELECT 1 FROM knowledge_citation_scopes s WHERE s.passage_id = p.passage_id AND s.incident_id = %s AND s.investigation_run_id = %s)
                 """,
                 (citation.evidence_id, citation.incident_id, citation.investigation_run_id),
