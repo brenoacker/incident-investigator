@@ -26,6 +26,7 @@ def query_knowledge_evidence(
     investigation_run_id: str,
     query: str | None = None,
     document_types: list[str] | None = None,
+    limit: int = 5,
 ) -> dict[str, object]:
     """Query explicitly authorized runbooks and ADRs as Untrusted Evidence."""
     try:
@@ -41,6 +42,7 @@ def query_knowledge_evidence(
                 if document_types
                 else None
             ),
+            limit=limit,
         )
     except ValueError as error:
         raise ValueError("invalid knowledge evidence query") from error

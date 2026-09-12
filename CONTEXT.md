@@ -42,3 +42,15 @@ _Avoid_: incident, agent session
 
 **Evaluated Run**: An Investigation Run executed by the Codex CLI in a read-only environment and submitted to the Quality Gate.
 _Avoid_: interactive debugging, manual demo
+
+**Semantic Retrieval**: The bounded process of finding relevant passages in authorized knowledge documents for an Investigation Run.
+_Avoid_: unrestricted knowledge search, generated answer
+
+**Hybrid Retrieval**: Semantic Retrieval that combines lexical matching with embedding similarity and returns a ranked set of passages.
+_Avoid_: generator, chatbot answer
+
+**Embedding Provider**: A replaceable capability that turns a query or authorized passage into a vector representation used by Semantic Retrieval.
+_Avoid_: RAG model, report generator
+
+**Retrieved Passage**: A bounded, revision-specific excerpt returned by an Evidence Provider with enough identity and Evidence Citation data for later verification.
+_Avoid_: whole document, trusted instruction
