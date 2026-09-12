@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import uuid
 from pathlib import Path
 
@@ -13,7 +14,12 @@ _AUTHORIZED_PATH_PREFIXES = ("docs/adr/", "docs/runbooks/", "docs/scenarios/")
 
 
 def is_authorized_path(path: str) -> bool:
-    return path.startswith(_AUTHORIZED_PATH_PREFIXES)
+    candidate = Path(path)
+    return (
+        not candidate.is_absolute()
+        and ".." not in candidate.parts
+        and path.startswith(_AUTHORIZED_PATH_PREFIXES)
+    )
 
 
 def load_document(root: Path, relative_path: str) -> KnowledgeDocument:
@@ -27,7 +33,12 @@ def load_document(root: Path, relative_path: str) -> KnowledgeDocument:
 
 
 def revision_id(document: KnowledgeDocument) -> str:
-    return hashlib.sha256(document.content.encode("utf-8")).hexdigest()
+    return hashlib.sha256(normalize_content(document.content).encode("utf-8")).hexdigest()
+
+
+def normalize_content(content: str) -> str:
+    lines = content.replace("\r\n", "\n").replace("\r", "\n").splitlines()
+    return "\n".join(line.rstrip() for line in lines).strip() + "\n"
 
 
 def chunk_markdown(content: str, chunk_size: int = 600, overlap: int = 100) -> tuple[str, ...]:
@@ -43,28 +54,14 @@ def chunk_markdown(content: str, chunk_size: int = 600, overlap: int = 100) -> t
             heading = line
         else:
             units.append(f"{heading}\n{line}" if heading else line)
-    chunks: list[str] = []
-    current: list[str] = []
-    current_size = 0
-    for unit in units:
-        words = unit.split()
-        while words:
-            available = chunk_size - current_size
-            if current and len(words) > available:
-                chunks.append("\n".join(current))
-                overlap_words = " ".join(current).split()[-overlap:]
-                current = [" ".join(overlap_words)] if overlap_words else []
-                current_size = len(overlap_words)
-                continue
-            take = min(len(words), available)
-            current.append(" ".join(words[:take]))
-            current_size += take
-            words = words[take:]
-            if current_size == chunk_size:
-                chunks.append("\n".join(current))
-                overlap_words = " ".join(current).split()[-overlap:]
-                current = [" ".join(overlap_words)] if overlap_words else []
-                current_size = len(overlap_words)
-    if current:
-        chunks.append("\n".join(current))
-    return tuple(chunks)
+    tokens = re.findall(r"\w+|[^\w\s]", " ".join(units), re.UNICODE)
+    step = chunk_size - overlap
+    return tuple(
+        _detokenize(tokens[start : start + chunk_size])
+        for start in range(0, len(tokens), step)
+    )
+
+
+def _detokenize(tokens: list[str]) -> str:
+    text = " ".join(tokens)
+    return re.sub(r"\s+([.,!?;:)\]])", r"\1", text)

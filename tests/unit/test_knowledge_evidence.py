@@ -16,6 +16,10 @@ from incident_investigation_harness.knowledge_evidence import (
     KnowledgeDocument,
     KnowledgeEvidenceQuery,
 )
+from incident_investigation_harness.knowledge_indexing import (
+    chunk_markdown,
+    revision_id,
+)
 
 
 def test_query_returns_only_allowlisted_documents(
@@ -64,6 +68,16 @@ def test_resolve_returns_an_authorized_document(
     assert resolved.citation == result.passages[0].citation
 
 
+def test_resolve_rejects_a_citation_from_another_investigation_run(
+    repository: KnowledgeEvidenceRepositoryFake,
+    context: InvestigationContext,
+) -> None:
+    citation = repository.query(KnowledgeEvidenceQuery(context=context)).passages[0].citation
+    other_run = citation.model_copy(update={"investigation_run_id": _id("other-run")})
+
+    assert repository.resolve(other_run) is None
+
+
 def test_resolve_returns_none_for_a_document_outside_the_allowlist(
     repository: KnowledgeEvidenceRepositoryFake,
     context: InvestigationContext,
@@ -85,6 +99,14 @@ def test_allowlist_rejects_non_knowledge_paths() -> None:
         KnowledgeEvidenceAdapter.from_allowlist(
             root=Path("."),
             allowlist=frozenset({"src/secret.py"}),
+        )
+
+
+def test_allowlist_rejects_path_traversal() -> None:
+    with pytest.raises(ValueError, match="authorized knowledge"):
+        KnowledgeEvidenceAdapter.from_allowlist(
+            root=Path("."),
+            allowlist=frozenset({"docs/adr/../../secret.md"}),
         )
 
 
@@ -124,6 +146,27 @@ def test_content_change_creates_a_new_revision_and_passage_id(
 
     assert first.revision_id != second.revision_id
     assert first.passage_id != second.passage_id
+
+
+def test_revision_id_normalizes_line_endings_and_trailing_whitespace() -> None:
+    first = KnowledgeDocument(
+        id=_id("normalized"),
+        path="docs/runbooks/a.md",
+        title="A",
+        content="# A\ntext\n",
+        document_type="runbook",
+    )
+    equivalent = first.model_copy(update={"content": "# A\r\ntext  \r\n"})
+
+    assert revision_id(first) == revision_id(equivalent)
+
+
+def test_chunk_markdown_has_a_bounded_token_window_with_overlap() -> None:
+    chunks = chunk_markdown(" ".join(f"word{i}" for i in range(1300)))
+
+    assert chunks
+    assert all(len(chunk.split()) <= 600 for chunk in chunks)
+    assert chunks[0].split()[-100:] == chunks[1].split()[:100]
 
 
 def test_query_respects_limit_and_returns_empty_for_weak_match(

@@ -93,7 +93,7 @@ class OpenAIEmbeddingAdapter:
 
 
 @dataclass(frozen=True)
-class KnowledgeEvidenceRepositoryFake:
+class KnowledgeEvidenceIndex:
     documents: tuple[KnowledgeDocument, ...]
     allowlist: frozenset[str]
     embedding_provider: EmbeddingProvider = field(default_factory=FakeEmbeddingProvider)
@@ -102,6 +102,9 @@ class KnowledgeEvidenceRepositoryFake:
     overlap: int = 100
     _passages: tuple[KnowledgePassage, ...] = field(init=False, repr=False)
     _vectors: list[list[float]] | None = field(init=False, repr=False)
+    _issued_scopes: set[tuple[uuid.UUID, uuid.UUID, uuid.UUID]] = field(
+        init=False, repr=False
+    )
 
     def __post_init__(self) -> None:
         passages = self._build_passages()
@@ -111,6 +114,7 @@ class KnowledgeEvidenceRepositoryFake:
         except (ImportError, RuntimeError):
             vectors = None
         object.__setattr__(self, "_vectors", vectors)
+        object.__setattr__(self, "_issued_scopes", set())
 
     def query(self, query: KnowledgeEvidenceQuery) -> KnowledgeEvidenceResponse:
         mode: RetrievalMode
@@ -138,7 +142,7 @@ class KnowledgeEvidenceRepositoryFake:
                     ranked.append((passage, score, kind))
             mode = "hybrid" if query_vector else "lexical"
         ranked.sort(key=lambda item: (-item[1], str(item[0].document_id), item[0].revision_id, str(item[0].passage_id)))
-        return KnowledgeEvidenceResponse(
+        response = KnowledgeEvidenceResponse(
             context=query.context,
             passages=tuple(
                 self._cite(passage, score, kind, query.context)
@@ -148,10 +152,23 @@ class KnowledgeEvidenceRepositoryFake:
             degraded=bool(query.query and query_vector is None),
             degraded_reason=("semantic embedding provider unavailable" if query.query and query_vector is None else None),
         )
+        if query.context:
+            self._issued_scopes.update(
+                (
+                    passage.item.passage_id,
+                    query.context.incident_id,
+                    query.context.investigation_run_id,
+                )
+                for passage in response.passages
+            )
+        return response
 
     def resolve(self, citation: EvidenceCitation) -> CitedKnowledgePassage | None:
         if citation.provider != "knowledge-mcp" or citation.evidence_type != "knowledge-document":
             raise ValueError("citation must belong to knowledge-mcp")
+        scope = (citation.evidence_id, citation.incident_id, citation.investigation_run_id)
+        if scope not in self._issued_scopes:
+            return None
         for passage in self._passages:
             if passage.passage_id == citation.evidence_id and passage.path in self.allowlist:
                 return self._cite(
@@ -211,7 +228,12 @@ class KnowledgeEvidenceRepositoryFake:
         )
 
 
-class KnowledgeEvidenceAdapter(KnowledgeEvidenceRepositoryFake):
+@dataclass(frozen=True)
+class KnowledgeEvidenceRepositoryFake(KnowledgeEvidenceIndex):
+    """Deterministic substitute for the knowledge evidence port."""
+
+
+class KnowledgeEvidenceAdapter(KnowledgeEvidenceIndex):
     """Read-only filesystem adapter constrained to an explicit document allowlist."""
 
     @classmethod
