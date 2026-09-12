@@ -24,17 +24,18 @@ def test_knowledge_mcp_exposes_only_read_only_tools() -> None:
 def test_query_returns_an_authorized_runbook_or_adr() -> None:
     result = query_knowledge_evidence(*_run_ids(), query="429")
 
-    assert len(result["documents"]) == 1
+    assert len(result["passages"]) == 1
     assert (
-        result["documents"][0]["item"]["path"]
+        result["passages"][0]["item"]["path"]
         == "docs/scenarios/retry-storm-latency.md"
     )
-    assert "429" in result["documents"][0]["excerpt"]
+    assert "429" in result["passages"][0]["item"]["text"]
+    assert result["passages"][0]["is_untrusted"] is True
 
 
 def test_query_scopes_citation_to_the_investigation_run() -> None:
     result = query_knowledge_evidence(*_run_ids(), query="429")
-    citation = result["documents"][0]["citation"]
+    citation = result["passages"][0]["citation"]
 
     assert citation["provider"] == "knowledge-mcp"
     assert citation["evidence_type"] == "knowledge-document"
@@ -43,7 +44,7 @@ def test_query_scopes_citation_to_the_investigation_run() -> None:
 
 def test_resolve_returns_the_queried_document() -> None:
     result = query_knowledge_evidence(*_run_ids(), query="429")
-    citation = result["documents"][0]["citation"]
+    citation = result["passages"][0]["citation"]
 
     resolved = resolve_knowledge_evidence_citation(**citation)
 
@@ -54,7 +55,7 @@ def test_resolve_returns_the_queried_document() -> None:
 
 def test_resolve_rejects_a_citation_from_another_provider() -> None:
     result = query_knowledge_evidence(*_run_ids(), query="429")
-    citation = result["documents"][0]["citation"]
+    citation = result["passages"][0]["citation"]
 
     with pytest.raises(ValueError, match="knowledge-mcp"):
         resolve_knowledge_evidence_citation(
@@ -69,7 +70,7 @@ def test_resolve_rejects_a_citation_from_another_provider() -> None:
 def test_query_does_not_return_unmatched_content() -> None:
     result = query_knowledge_evidence(*_run_ids(), query="source-mcp")
 
-    assert result["documents"] == []
+    assert result["passages"] == []
 
 
 def _run_ids() -> tuple[str, str]:

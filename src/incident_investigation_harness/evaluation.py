@@ -127,7 +127,7 @@ def evidence_set_for(request: EvaluatedRunRequest) -> EvidenceSet:
 
     if request.scenario != ScenarioName.AMBIGUOUS_EVIDENCE:
         knowledge_response = knowledge.query(KnowledgeEvidenceQuery(context=context))
-        citations.extend(item.citation for item in knowledge_response.documents)
+        citations.extend(item.citation for item in knowledge_response.passages)
         resolvers.append(knowledge)
         source_response = source.query(SourceEvidenceQuery(context=context))
         citations.extend(item.citation for item in source_response.artifacts)

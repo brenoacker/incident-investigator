@@ -161,10 +161,10 @@ Codex starts with the incident ticket and queries the sources it needs. Each sou
 | --- | --- | --- |
 | `incident-mcp` | Incident ticket, comments and timeline | Implemented and available in Compose |
 | `operations-mcp` | Operational logs, metrics and traces | Implemented and available in Compose |
-| `knowledge-mcp` | Explicitly allowlisted runbooks and ADRs | Implemented and available in Compose |
+| `knowledge-mcp` | Explicitly allowlisted runbooks and ADRs | Implemented and available in Compose with bounded hybrid retrieval |
 | `source-mcp` | Explicitly allowlisted code, diff and Git history | Implemented and available in Compose; read-only paths and refs |
 
-The current `knowledge-mcp` allowlist contains `docs/scenarios/retry-storm-latency.md` and `docs/adr/0001-postgresql-for-ticket-persistence.md`. It returns the authorized document, a relevant excerpt and a citation; source code and Git history remain outside its surface.
+The current `knowledge-mcp` allowlist contains `docs/scenarios/retry-storm-latency.md` and `docs/adr/0001-postgresql-for-ticket-persistence.md`. An operator explicitly runs the `knowledge-index` Compose service with the `indexing` profile to synchronize allowlisted Markdown into PostgreSQL/pgvector; `knowledge-mcp` only validates and queries the existing index. The MCP returns ranked, revision-specific passages through hybrid lexical and semantic search; source code and Git history remain outside its surface. The initial local embedding provider is `intfloat/multilingual-e5-small`; an OpenAI provider is optional. If semantic embeddings are unavailable, the response exposes a degraded lexical mode. The MCP does not generate or summarize answers: synthesis remains in the investigation coordinator described by #68.
 
 ```mermaid
 flowchart TD

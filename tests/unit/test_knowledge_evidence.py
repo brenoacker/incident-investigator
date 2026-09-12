@@ -8,12 +8,17 @@ import pytest
 from incident_investigation_harness.adapters.knowledge_evidence import (
     KnowledgeEvidenceAdapter,
     KnowledgeEvidenceRepositoryFake,
+    OpenAIEmbeddingAdapter,
 )
 from incident_investigation_harness.context import InvestigationContext
 from incident_investigation_harness.evidence import EvidenceCitation
 from incident_investigation_harness.knowledge_evidence import (
     KnowledgeDocument,
     KnowledgeEvidenceQuery,
+)
+from incident_investigation_harness.knowledge_indexing import (
+    chunk_markdown,
+    revision_id,
 )
 
 
@@ -24,7 +29,7 @@ def test_query_returns_only_allowlisted_documents(
 ) -> None:
     result = repository.query(KnowledgeEvidenceQuery(context=context))
 
-    assert [document.item.path for document in result.documents] == [allowed.path]
+    assert [passage.item.path for passage in result.passages] == [allowed.path]
 
 
 def test_query_returns_a_relevant_excerpt(
@@ -33,7 +38,7 @@ def test_query_returns_a_relevant_excerpt(
 ) -> None:
     result = repository.query(KnowledgeEvidenceQuery(context=context, query="backoff"))
 
-    assert result.documents[0].excerpt == "Use bounded retries and backoff."
+    assert result.passages[0].item.text == "Use bounded retries and backoff."
 
 
 def test_query_uses_stable_scoped_citations(
@@ -41,8 +46,8 @@ def test_query_uses_stable_scoped_citations(
     context: InvestigationContext,
 ) -> None:
     query = KnowledgeEvidenceQuery(context=context, query="backoff")
-    first = repository.query(query).documents[0].citation
-    repeated = repository.query(query).documents[0].citation
+    first = repository.query(query).passages[0].citation
+    repeated = repository.query(query).passages[0].citation
 
     assert first == repeated
     assert first.provider == "knowledge-mcp"
@@ -57,7 +62,20 @@ def test_resolve_returns_an_authorized_document(
 ) -> None:
     result = repository.query(KnowledgeEvidenceQuery(context=context))
 
-    assert repository.resolve(result.documents[0].citation) == result.documents[0]
+    resolved = repository.resolve(result.passages[0].citation)
+    assert resolved is not None
+    assert resolved.item == result.passages[0].item
+    assert resolved.citation == result.passages[0].citation
+
+
+def test_resolve_rejects_a_citation_from_another_investigation_run(
+    repository: KnowledgeEvidenceRepositoryFake,
+    context: InvestigationContext,
+) -> None:
+    citation = repository.query(KnowledgeEvidenceQuery(context=context)).passages[0].citation
+    other_run = citation.model_copy(update={"investigation_run_id": _id("other-run")})
+
+    assert repository.resolve(other_run) is None
 
 
 def test_resolve_returns_none_for_a_document_outside_the_allowlist(
@@ -84,11 +102,108 @@ def test_allowlist_rejects_non_knowledge_paths() -> None:
         )
 
 
+def test_allowlist_rejects_path_traversal() -> None:
+    with pytest.raises(ValueError, match="authorized knowledge"):
+        KnowledgeEvidenceAdapter.from_allowlist(
+            root=Path("."),
+            allowlist=frozenset({"docs/adr/../../secret.md"}),
+        )
+
+
 def test_repository_has_no_write_interface(
     repository: KnowledgeEvidenceRepositoryFake,
 ) -> None:
+    attribute_name = "create"
     with pytest.raises(AttributeError):
-        getattr(repository, "create")
+        getattr(repository, attribute_name)
+
+
+def test_query_returns_passage_revision_and_rank_metadata(
+    repository: KnowledgeEvidenceRepositoryFake,
+    context: InvestigationContext,
+) -> None:
+    result = repository.query(KnowledgeEvidenceQuery(context=context, query="backoff"))
+
+    passage = result.passages[0]
+    assert len(passage.item.revision_id) == 64
+    assert passage.item.passage_id == passage.citation.evidence_id
+    assert passage.relevance_score > 0
+    assert passage.match_kind in {"lexical", "semantic", "hybrid"}
+    assert passage.is_untrusted is True
+
+
+def test_content_change_creates_a_new_revision_and_passage_id(
+    allowed: KnowledgeDocument,
+    context: InvestigationContext,
+) -> None:
+    first = KnowledgeEvidenceRepositoryFake(
+        documents=(allowed,), allowlist=frozenset({allowed.path})
+    ).query(KnowledgeEvidenceQuery(context=context)).passages[0].item
+    changed = allowed.model_copy(update={"content": allowed.content + " Use jitter."})
+    second = KnowledgeEvidenceRepositoryFake(
+        documents=(changed,), allowlist=frozenset({changed.path})
+    ).query(KnowledgeEvidenceQuery(context=context)).passages[0].item
+
+    assert first.revision_id != second.revision_id
+    assert first.passage_id != second.passage_id
+
+
+def test_revision_id_normalizes_line_endings_and_trailing_whitespace() -> None:
+    first = KnowledgeDocument(
+        id=_id("normalized"),
+        path="docs/runbooks/a.md",
+        title="A",
+        content="# A\ntext\n",
+        document_type="runbook",
+    )
+    equivalent = first.model_copy(update={"content": "# A\r\ntext  \r\n"})
+
+    assert revision_id(first) == revision_id(equivalent)
+
+
+def test_chunk_markdown_has_a_bounded_token_window_with_overlap() -> None:
+    chunks = chunk_markdown(" ".join(f"word{i}" for i in range(1300)))
+
+    assert chunks
+    assert all(len(chunk.split()) <= 600 for chunk in chunks)
+    assert chunks[0].split()[-100:] == chunks[1].split()[:100]
+
+
+def test_query_respects_limit_and_returns_empty_for_weak_match(
+    repository: KnowledgeEvidenceRepositoryFake,
+    context: InvestigationContext,
+) -> None:
+    assert len(repository.query(KnowledgeEvidenceQuery(context=context, limit=1)).passages) == 1
+    assert repository.query(KnowledgeEvidenceQuery(context=context, query="unrelated" )).passages == ()
+
+
+def test_unavailable_embeddings_fall_back_to_lexical_and_are_visible(
+    allowed: KnowledgeDocument,
+    context: InvestigationContext,
+) -> None:
+    class UnavailableProvider:
+        name = "unavailable"
+        model = "unavailable"
+        dimensions = 2
+
+        def embed(self, texts: list[str]) -> list[list[float]]:
+            raise RuntimeError("provider unavailable")
+
+    result = KnowledgeEvidenceRepositoryFake(
+        documents=(allowed,),
+        allowlist=frozenset({allowed.path}),
+        embedding_provider=UnavailableProvider(),
+    ).query(KnowledgeEvidenceQuery(context=context, query="backoff"))
+
+    assert result.retrieval_mode == "lexical"
+    assert result.degraded is True
+    assert result.passages[0].match_kind == "lexical"
+
+
+def test_openai_adapter_requires_an_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    with pytest.raises(RuntimeError, match="OPENAI_API_KEY"):
+        OpenAIEmbeddingAdapter(api_key=None).embed(["text"])
 
 
 @pytest.fixture
