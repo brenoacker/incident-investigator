@@ -85,8 +85,11 @@ class PostgresKnowledgeEvidenceAdapter:  # pragma: no cover - exercised by Postg
         with psycopg.connect(self.database_url) as connection:
             signature = (self.embedding_provider.name, self.embedding_provider.model, self.embedding_provider.model_revision, self.embedding_provider.dimensions)
             previous = connection.execute("SELECT provider_name, model_name, model_revision, dimensions FROM knowledge_embedding_metadata WHERE id = TRUE").fetchone()
-            if previous and tuple(previous) != signature:
-                connection.execute("TRUNCATE knowledge_passages, knowledge_citation_scopes")
+            if previous and int(previous[3]) != self.embedding_provider.dimensions:
+                raise ValueError(
+                    "embedding dimensions changed; use a new knowledge index schema "
+                    "before switching providers"
+                )
             connection.execute("DELETE FROM knowledge_embedding_metadata")
             connection.execute("INSERT INTO knowledge_embedding_metadata (provider_name, model_name, model_revision, dimensions) VALUES (%s, %s, %s, %s)", signature)
             connection.execute("UPDATE knowledge_documents SET authorized = FALSE")
@@ -109,7 +112,7 @@ class PostgresKnowledgeEvidenceAdapter:  # pragma: no cover - exercised by Postg
                         INSERT INTO knowledge_passages
                         (passage_id, document_id, revision_id, path, title, document_type, passage_text, ordinal, embedding)
                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        ON CONFLICT (passage_id) DO NOTHING
+                        ON CONFLICT (passage_id) DO UPDATE SET embedding = EXCLUDED.embedding
                         """,
                         (*_row(passage), _vector_literal(vector)),
                     )
