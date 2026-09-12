@@ -7,6 +7,24 @@ from typing import Any, cast
 
 import psycopg
 
+from incident_investigation_harness.adapters.knowledge_queries import (
+    ALTER_DOCUMENTS_TABLE_SQL,
+    CREATE_CITATION_SCOPES_TABLE_SQL,
+    CREATE_DOCUMENTS_TABLE_SQL,
+    CREATE_EMBEDDING_METADATA_TABLE_SQL,
+    CREATE_EXTENSION_SQL,
+    CREATE_PASSAGES_TABLE_SQL,
+    DEAUTHORIZE_DOCUMENTS_SQL,
+    DELETE_EMBEDDING_METADATA_SQL,
+    HYBRID_QUERY_SQL,
+    INSERT_CITATION_SCOPE_SQL,
+    INSERT_EMBEDDING_METADATA_SQL,
+    LEXICAL_QUERY_SQL,
+    RESOLVE_CITATION_SQL,
+    SELECT_EMBEDDING_METADATA_SQL,
+    UPSERT_DOCUMENT_SQL,
+    UPSERT_PASSAGE_SQL,
+)
 from incident_investigation_harness.knowledge_evidence import (
     CitedKnowledgePassage,
     EmbeddingProvider,
@@ -38,42 +56,16 @@ class PostgresKnowledgeEvidenceAdapter:  # pragma: no cover - exercised by Postg
 
     def initialize(self) -> None:
         with psycopg.connect(self.database_url) as connection:
-            connection.execute("CREATE EXTENSION IF NOT EXISTS vector")
+            connection.execute(CREATE_EXTENSION_SQL)
+            connection.execute(CREATE_DOCUMENTS_TABLE_SQL)
+            connection.execute(ALTER_DOCUMENTS_TABLE_SQL)
             connection.execute(
-                """
-                CREATE TABLE IF NOT EXISTS knowledge_documents (
-                    document_id UUID NOT NULL,
-                    path TEXT PRIMARY KEY,
-                    title TEXT NOT NULL,
-                    document_type TEXT NOT NULL,
-                    current_revision_id CHAR(64) NOT NULL,
-                    provider_name TEXT NOT NULL,
-                    model_name TEXT NOT NULL,
-                    model_revision TEXT NOT NULL,
-                    embedding_dimensions INTEGER NOT NULL,
-                    authorized BOOLEAN NOT NULL DEFAULT TRUE
+                CREATE_PASSAGES_TABLE_SQL.format(
+                    dimensions=self.embedding_provider.dimensions
                 )
-                """
             )
-            connection.execute("ALTER TABLE knowledge_documents ADD COLUMN IF NOT EXISTS provider_name TEXT NOT NULL DEFAULT 'unknown', ADD COLUMN IF NOT EXISTS model_name TEXT NOT NULL DEFAULT 'unknown', ADD COLUMN IF NOT EXISTS model_revision TEXT NOT NULL DEFAULT 'unknown', ADD COLUMN IF NOT EXISTS embedding_dimensions INTEGER NOT NULL DEFAULT 384")
-            connection.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS knowledge_passages (
-                    passage_id UUID PRIMARY KEY,
-                    document_id UUID NOT NULL,
-                    revision_id CHAR(64) NOT NULL,
-                    path TEXT NOT NULL,
-                    title TEXT NOT NULL,
-                    document_type TEXT NOT NULL,
-                    passage_text TEXT NOT NULL,
-                    ordinal INTEGER NOT NULL,
-                    embedding vector({self.embedding_provider.dimensions}) NOT NULL,
-                    UNIQUE (document_id, revision_id, ordinal)
-                )
-                """
-            )
-            connection.execute("CREATE TABLE IF NOT EXISTS knowledge_embedding_metadata (id BOOLEAN PRIMARY KEY DEFAULT TRUE, provider_name TEXT NOT NULL, model_name TEXT NOT NULL, model_revision TEXT NOT NULL, dimensions INTEGER NOT NULL)")
-            connection.execute("CREATE TABLE IF NOT EXISTS knowledge_citation_scopes (passage_id UUID NOT NULL, incident_id UUID NOT NULL, investigation_run_id UUID NOT NULL, PRIMARY KEY (passage_id, incident_id, investigation_run_id))")
+            connection.execute(CREATE_EMBEDDING_METADATA_TABLE_SQL)
+            connection.execute(CREATE_CITATION_SCOPES_TABLE_SQL)
             connection.commit()
 
     def sync(self, root: Path, allowlist: frozenset[str]) -> int:
@@ -84,36 +76,26 @@ class PostgresKnowledgeEvidenceAdapter:  # pragma: no cover - exercised by Postg
         written = 0
         with psycopg.connect(self.database_url) as connection:
             signature = (self.embedding_provider.name, self.embedding_provider.model, self.embedding_provider.model_revision, self.embedding_provider.dimensions)
-            previous = connection.execute("SELECT provider_name, model_name, model_revision, dimensions FROM knowledge_embedding_metadata WHERE id = TRUE").fetchone()
+            previous = connection.execute(SELECT_EMBEDDING_METADATA_SQL).fetchone()
             if previous and int(previous[3]) != self.embedding_provider.dimensions:
                 raise ValueError(
                     "embedding dimensions changed; use a new knowledge index schema "
                     "before switching providers"
                 )
-            connection.execute("DELETE FROM knowledge_embedding_metadata")
-            connection.execute("INSERT INTO knowledge_embedding_metadata (provider_name, model_name, model_revision, dimensions) VALUES (%s, %s, %s, %s)", signature)
-            connection.execute("UPDATE knowledge_documents SET authorized = FALSE")
+            connection.execute(DELETE_EMBEDDING_METADATA_SQL)
+            connection.execute(INSERT_EMBEDDING_METADATA_SQL, signature)
+            connection.execute(DEAUTHORIZE_DOCUMENTS_SQL)
             for document in documents:
                 current_revision_id = revision_id(document)
                 passages = _passages(document)
                 vectors = self.embedding_provider.embed([f"passage: {passage.text}" for passage in passages])
                 connection.execute(
-                    """
-                    INSERT INTO knowledge_documents (document_id, path, title, document_type, current_revision_id, provider_name, model_name, model_revision, embedding_dimensions, authorized)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, TRUE)
-                    ON CONFLICT (path) DO UPDATE SET title=EXCLUDED.title, document_type=EXCLUDED.document_type,
-                    current_revision_id=EXCLUDED.current_revision_id, provider_name=EXCLUDED.provider_name, model_name=EXCLUDED.model_name, model_revision=EXCLUDED.model_revision, embedding_dimensions=EXCLUDED.embedding_dimensions, authorized=TRUE
-                    """,
+                    UPSERT_DOCUMENT_SQL,
                     (document.id, document.path, document.title, document.document_type, current_revision_id, self.embedding_provider.name, self.embedding_provider.model, self.embedding_provider.model_revision, self.embedding_provider.dimensions),
                 )
                 for passage, vector in zip(passages, vectors):
                     connection.execute(
-                        """
-                        INSERT INTO knowledge_passages
-                        (passage_id, document_id, revision_id, path, title, document_type, passage_text, ordinal, embedding)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        ON CONFLICT (passage_id) DO UPDATE SET embedding = EXCLUDED.embedding
-                        """,
+                        UPSERT_PASSAGE_SQL,
                         (*_row(passage), _vector_literal(vector)),
                     )
                     written += 1
@@ -131,25 +113,7 @@ class PostgresKnowledgeEvidenceAdapter:  # pragma: no cover - exercised by Postg
         types = tuple(query.document_types or ("runbook", "adr"))
         with psycopg.connect(self.database_url) as connection:
             rows = connection.execute(
-                """
-                WITH ranked AS (
-                SELECT passage_id, document_id, revision_id, path, title, document_type,
-                       passage_text, ordinal,
-                       ts_rank_cd(to_tsvector('simple', passage_text), plainto_tsquery('simple', %s)) AS lexical_score,
-                       1 - (embedding <=> %s::vector) AS semantic_score,
-                       (ts_rank_cd(to_tsvector('simple', passage_text), plainto_tsquery('simple', %s))
-                        + GREATEST(1 - (embedding <=> %s::vector), 0)) / 2 AS relevance_score
-                FROM knowledge_passages p
-                JOIN knowledge_documents d USING (document_id)
-                WHERE d.authorized AND d.current_revision_id = p.revision_id
-                  AND document_type = ANY(%s)
-                )
-                SELECT * FROM ranked
-                WHERE relevance_score >= %s
-                ORDER BY relevance_score DESC,
-                         document_id, revision_id, passage_id
-                LIMIT %s
-                """,
+                HYBRID_QUERY_SQL,
                 (query.query or "", vector_literal, query.query or "", vector_literal, list(types), self.threshold, query.limit),
             ).fetchall()
         response = _response_from_rows(query, rows)
@@ -159,21 +123,14 @@ class PostgresKnowledgeEvidenceAdapter:  # pragma: no cover - exercised by Postg
     def _record_scopes(self, query: KnowledgeEvidenceQuery, response: KnowledgeEvidenceResponse) -> None:
         with psycopg.connect(self.database_url) as connection:
             for passage in response.passages:
-                connection.execute("INSERT INTO knowledge_citation_scopes (passage_id, incident_id, investigation_run_id) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING", (passage.item.passage_id, query.context.incident_id, query.context.investigation_run_id))
+                connection.execute(INSERT_CITATION_SCOPE_SQL, (passage.item.passage_id, query.context.incident_id, query.context.investigation_run_id))
             connection.commit()
 
     def _query_lexical(self, query: KnowledgeEvidenceQuery) -> KnowledgeEvidenceResponse:
         types = list(query.document_types or ("runbook", "adr"))
         with psycopg.connect(self.database_url) as connection:
             rows = connection.execute(
-                """
-                SELECT passage_id, document_id, revision_id, path, title, document_type, passage_text, ordinal,
-                       ts_rank_cd(to_tsvector('simple', passage_text), plainto_tsquery('simple', %s)) AS lexical_score
-                FROM knowledge_passages p JOIN knowledge_documents d USING (document_id)
-                WHERE d.authorized AND d.current_revision_id = p.revision_id AND document_type = ANY(%s)
-                  AND ts_rank_cd(to_tsvector('simple', passage_text), plainto_tsquery('simple', %s)) >= %s
-                ORDER BY lexical_score DESC, document_id, revision_id, passage_id LIMIT %s
-                """,
+                LEXICAL_QUERY_SQL,
                 (query.query or "", types, query.query or "", self.threshold, query.limit),
             ).fetchall()
         response = _response_from_lexical_rows(query, rows)
@@ -185,13 +142,7 @@ class PostgresKnowledgeEvidenceAdapter:  # pragma: no cover - exercised by Postg
             raise ValueError("citation must belong to knowledge-mcp")
         with psycopg.connect(self.database_url) as connection:
             row = connection.execute(
-                """
-                SELECT passage_id, document_id, revision_id, path, title, document_type, passage_text, ordinal
-                FROM knowledge_passages p JOIN knowledge_documents d USING (document_id)
-                WHERE p.passage_id = %s AND d.authorized
-                  AND d.current_revision_id = p.revision_id
-                  AND EXISTS (SELECT 1 FROM knowledge_citation_scopes s WHERE s.passage_id = p.passage_id AND s.incident_id = %s AND s.investigation_run_id = %s)
-                """,
+                RESOLVE_CITATION_SQL,
                 (citation.evidence_id, citation.incident_id, citation.investigation_run_id),
             ).fetchone()
         if row is None:
