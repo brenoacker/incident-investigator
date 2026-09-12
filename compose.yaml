@@ -1,6 +1,6 @@
 services:
   db:
-    image: postgres:17-alpine
+    image: pgvector/pgvector:pg17
     ports:
       - "5432:5432"
     environment:
@@ -108,23 +108,33 @@ services:
         "incident_investigation_harness.mcp.operations_mcp"
       ]
 
+  knowledge-index:
+    profiles: ["indexing"]
+    build:
+      context: .
+    environment:
+      DATABASE_URL: postgresql://ticketing:ticketing@db:5432/ticketing
+      KNOWLEDGE_EMBEDDING_MODEL: intfloat/multilingual-e5-small
+    command: ["uv", "run", "--no-sync", "python", "-m", "incident_investigation_harness.knowledge_index", "sync"]
+    depends_on:
+      db:
+        condition: service_healthy
+
   knowledge-mcp:
     build:
       context: .
     ports:
       - "8003:8003"
     environment:
+      DATABASE_URL: postgresql://ticketing:ticketing@db:5432/ticketing
+      KNOWLEDGE_INDEX_MODE: postgres
+      KNOWLEDGE_EMBEDDING_MODEL: intfloat/multilingual-e5-small
       OTEL_SERVICE_NAME: knowledge-mcp
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
-    command:
-      [
-        "uv",
-        "run",
-        "--no-sync",
-        "python",
-        "-m",
-        "incident_investigation_harness.mcp.knowledge_mcp"
-      ]
+    command: ["uv", "run", "--no-sync", "python", "-m", "incident_investigation_harness.mcp.knowledge_mcp"]
+    depends_on:
+      db:
+        condition: service_healthy
 
   source-mcp:
     build:
