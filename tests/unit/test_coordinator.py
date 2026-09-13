@@ -7,6 +7,7 @@ import pytest
 from incident_investigation_harness.context import InvestigationContext
 from incident_investigation_harness.evidence import EvidenceCitation
 from incident_investigation_harness.coordinator import (
+    CoordinatorInvestigatorAdapter,
     EvidenceQuery,
     EvidenceQueryResult,
     InvestigationCoordinator,
@@ -14,6 +15,13 @@ from incident_investigation_harness.coordinator import (
     InvestigationStage,
     ProviderFailure,
 )
+from incident_investigation_harness.isolation import InvestigationSandbox
+from incident_investigation_harness.report import (
+    Confidence, FactualClaim, InvestigationReport, Mitigation
+)
+from incident_investigation_harness.quality_gate import EvidenceSet
+from incident_investigation_harness.runner import EvaluatedRunRequest, EvaluatedRunRunner
+from incident_investigation_harness.scenarios import ScenarioName
 
 
 def test_coordinator_follows_an_evidence_gap_and_preserves_context() -> None:
@@ -91,6 +99,61 @@ def test_coordinator_exhausts_configured_query_limit() -> None:
     assert len(result.events) == 4
 
 
+def test_coordinator_adapter_runs_through_the_evaluated_run_runner() -> None:
+    request = EvaluatedRunRequest(
+        scenario=ScenarioName.RETRY_STORM,
+        incident_id=uuid.uuid4(),
+        investigation_run_id=uuid.uuid4(),
+    )
+    citation = _citation(request.context, "incident-mcp")
+    report = _report(request, citation)
+
+    adapter = CoordinatorInvestigatorAdapter(
+        planner=lambda received, environment: InvestigationPlan(
+            initial_queries=(EvidenceQuery(provider="incident-mcp", question="bound incident"),)
+        ),
+        query=lambda query: EvidenceQueryResult(
+            provider=query.provider, citations=(citation,), evidence=("ticket",)
+        ),
+        follow_up=lambda gaps: (),
+        synthesize=lambda context, results: report,
+    )
+    result = EvaluatedRunRunner(
+        adapter,
+        evidence_set=EvidenceSet(context=request.context, citations=frozenset({citation})),
+        sandbox=InvestigationSandbox(allowed_evidence_providers=("incident-mcp",)),
+    ).run(request)
+
+    assert result.execution_failure is None
+    assert result.report == report
+    assert [event.event_type for event in result.events] == [
+        "investigation.planning",
+        "investigation.evidence-gathering",
+        "investigation.synthesis",
+        "investigation.completed",
+    ]
+
+
+def test_synthesis_cannot_introduce_uncited_evidence() -> None:
+    context = _context()
+    gathered = _citation(context, "incident-mcp")
+    invented = _citation(context, "incident-mcp")
+
+    result = InvestigationCoordinator(
+        query=lambda query: EvidenceQueryResult(
+            provider=query.provider, citations=(gathered,)
+        ),
+        synthesize=lambda context, results: _report_for_context(context, invented),
+    ).run(
+        context,
+        plan=InvestigationPlan(initial_queries=(EvidenceQuery(provider="incident-mcp", question="incident"),)),
+        follow_up=lambda gaps: (),
+    )
+
+    assert result.failure is not None
+    assert "citation" in result.failure
+
+
 def _context() -> InvestigationContext:
     return InvestigationContext(incident_id=uuid.uuid4(), investigation_run_id=uuid.uuid4())
 
@@ -102,4 +165,23 @@ def _citation(context: InvestigationContext, provider: str) -> EvidenceCitation:
         investigation_run_id=context.investigation_run_id,
         evidence_type="ticket",
         evidence_id=uuid.uuid4(),
+    )
+
+
+def _report(request: EvaluatedRunRequest, citation: EvidenceCitation) -> InvestigationReport:
+    return _report_for_context(request.context, citation)
+
+
+def _report_for_context(context: InvestigationContext, citation: EvidenceCitation) -> InvestigationReport:
+    return InvestigationReport(
+        schema_version="1.0",
+        incident_id=context.incident_id,
+        investigation_run_id=context.investigation_run_id,
+        impact="Notification delivery was delayed.",
+        timeline=(),
+        factual_claims=(FactualClaim(id="claim-1", statement="The ticket exists.", citations=(citation,)),),
+        hypotheses=(),
+        confidence=Confidence(level="low", rationale="Evidence is limited."),
+        suggested_mitigation=Mitigation(action="Collect evidence.", rationale="Review it."),
+        evidence_gaps=(),
     )

@@ -10,9 +10,17 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from incident_investigation_harness.context import InvestigationContext
 from incident_investigation_harness.evidence import EvidenceCitation
-from incident_investigation_harness.isolation import AllowedEvidenceProvider
+from incident_investigation_harness.isolation import (
+    AllowedEvidenceProvider,
+    InvestigationEnvironment,
+)
 from incident_investigation_harness.report import InvestigationReport
-from incident_investigation_harness.runner import InvestigationEvent
+from incident_investigation_harness.runner import (
+    EvaluatedRunRequest,
+    InvestigationEvent,
+    InvestigatorExecution,
+    InvestigatorExecutionFailure,
+)
 
 
 class InvestigationStage(StrEnum):
@@ -53,6 +61,10 @@ class InvestigationPlan(BaseModel):
 
 class ProviderFailure(RuntimeError):
     """A provider could not answer a read-only query."""
+
+
+class SynthesisFailure(RuntimeError):
+    """The collected evidence cannot produce a traceable report."""
 
 
 class EvidenceQueryPort(Protocol):
@@ -191,7 +203,13 @@ class InvestigationCoordinator:
                 InvestigationStage.SYNTHESIS, query_count, {"stop_reason": stop_reason}
             ))
             if self._synthesize is not None:
-                report = self._synthesize(context, tuple(gathered))
+                try:
+                    report = self._synthesize(context, tuple(gathered))
+                    _validate_synthesized_report(report, context, gathered)
+                except SynthesisFailure as error:
+                    report = None
+                    failure = str(error)
+                    stop_reason = "synthesis-failure"
             stages.append(InvestigationStageResult(
                 InvestigationStage.COMPLETED, query_count, {"reason": stop_reason}
             ))
@@ -204,3 +222,81 @@ class InvestigationCoordinator:
         return InvestigationCoordinatorResult(
             context, tuple(stages), tuple(gathered), citations, report, stop_reason, failure
         )
+
+
+Planner = Callable[[EvaluatedRunRequest, InvestigationEnvironment], InvestigationPlan]
+
+
+class CoordinatorInvestigatorAdapter:
+    """Adapt the coordinator to the runner's public InvestigatorAdapter port."""
+
+    def __init__(
+        self,
+        planner: Planner,
+        query: EvidenceQueryPort,
+        follow_up: FollowUpSelector,
+        synthesize: Synthesizer,
+        *,
+        max_queries: int = 8,
+    ) -> None:
+        self._planner = planner
+        self._query = query
+        self._follow_up = follow_up
+        self._synthesize = synthesize
+        self._max_queries = max_queries
+
+    def investigate(
+        self, request: EvaluatedRunRequest, environment: InvestigationEnvironment
+    ) -> InvestigatorExecution:
+        coordinator = InvestigationCoordinator(
+            self._query,
+            authorized_providers=environment.allowed_evidence_providers,
+            max_queries=self._max_queries,
+            synthesize=self._synthesize,
+        )
+        try:
+            result = coordinator.run(
+                request.context,
+                plan=self._planner(request, environment),
+                follow_up=self._follow_up,
+            )
+        except SynthesisFailure as error:
+            raise InvestigatorExecutionFailure(
+                str(error), category="invalid-output"
+            ) from error
+        if result.failure is not None:
+            raise InvestigatorExecutionFailure(
+                result.failure,
+                result.events,
+                category=(
+                    "invalid-output"
+                    if result.stop_reason == "synthesis-failure"
+                    else "provider-unavailable"
+                ),
+            )
+        if result.report is None:
+            raise InvestigatorExecutionFailure(
+                "coordinator produced no Investigation Report",
+                result.events,
+                category="report-missing",
+            )
+        return InvestigatorExecution(report=result.report, events=result.events)
+
+
+def _validate_synthesized_report(
+    report: InvestigationReport,
+    context: InvestigationContext,
+    gathered: list[EvidenceQueryResult],
+) -> None:
+    if report.incident_id != context.incident_id or report.investigation_run_id != context.investigation_run_id:
+        raise SynthesisFailure("synthesized report belongs to another Investigation Run")
+    gathered_citations = {
+        citation for result in gathered for citation in result.citations
+    }
+    report_citations = {
+        citation for claim in report.factual_claims for citation in claim.citations
+    }
+    if not gathered_citations.issubset(report_citations):
+        raise SynthesisFailure("synthesized report omitted gathered evidence citations")
+    if not report_citations.issubset(gathered_citations):
+        raise SynthesisFailure("synthesized report introduced an unknown Evidence Citation")
