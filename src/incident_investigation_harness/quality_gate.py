@@ -378,10 +378,23 @@ class QualityGate:
                     report, evidence_set, oracle, events=events, environment=environment
                 )
         finally:
+            verdict = result.verdict if result is not None else "error"
             telemetry.quality_gate_duration.record(
                 perf_counter() - started,
-                {"verdict": result.verdict if result is not None else "error"},
+                {"verdict": verdict},
             )
+            telemetry.quality_gate_verdicts.add(1, {"verdict": verdict})
+            if result is not None:
+                for reason in result.reasons:
+                    if reason.code in {
+                        "missing-citation",
+                        "citation-not-in-evidence-set",
+                        "citation-from-other-run",
+                        "unresolvable-citation",
+                    }:
+                        telemetry.quality_gate_citation_failures.add(
+                            1, {"reason": reason.code}
+                        )
         assert result is not None
         return result
 

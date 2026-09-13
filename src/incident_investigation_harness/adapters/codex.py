@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 from threading import Thread
 from time import monotonic
+from time import perf_counter
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, cast
@@ -19,6 +20,7 @@ from incident_investigation_harness.runner import (
     EvaluatedRunRequest, InvestigationEvent, InvestigatorExecution,
     InvestigatorExecutionFailure, InvestigatorUsage)
 from incident_investigation_harness.scenarios import ScenarioName
+from incident_investigation_harness.telemetry import record_model_execution, span
 
 CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
 
@@ -33,13 +35,66 @@ class CodexInvestigatorAdapter:
         executable: str = "codex",
         command_runner: CommandRunner = subprocess.run,
         timeout_seconds: float = 300,
+        model_version: str = "codex-cli",
+        prompt_version: str = "investigation-prompt-v1",
     ) -> None:
         self._mcp_servers = dict(mcp_servers)
         self._executable = executable
         self._command_runner = command_runner
         self._timeout_seconds = timeout_seconds
+        self._model_version = model_version
+        self._prompt_version = prompt_version
 
     def investigate(
+        self, request: EvaluatedRunRequest, environment: InvestigationEnvironment
+    ) -> InvestigatorExecution:
+        """Execute the model while emitting safe, correlated AI telemetry."""
+        started = perf_counter()
+        with span(
+            "investigation-model-execution",
+            context=request.context,
+            component="codex-investigator",
+            operation="model.execute",
+            scenario=request.scenario.value,
+            attributes={
+                "model_version": self._model_version,
+                "prompt_version": self._prompt_version,
+            },
+        ):
+            try:
+                execution = self._investigate(request, environment)
+            except InvestigatorExecutionFailure as error:
+                usage = error.usage
+                record_model_execution(
+                    context=request.context,
+                    scenario=request.scenario.value,
+                    model_version=self._model_version,
+                    prompt_version=self._prompt_version,
+                    duration_seconds=perf_counter() - started,
+                    input_tokens=usage.input_tokens if usage else None,
+                    output_tokens=usage.output_tokens if usage else None,
+                    estimated_cost=usage.estimated_cost if usage else None,
+                    outcome="failure",
+                    failure_category=error.category,
+                    retries=usage.retries if usage else 0,
+                )
+                raise
+            usage = execution.usage
+            record_model_execution(
+                context=request.context,
+                scenario=request.scenario.value,
+                model_version=self._model_version,
+                prompt_version=self._prompt_version,
+                duration_seconds=perf_counter() - started,
+                input_tokens=usage.input_tokens if usage else None,
+                output_tokens=usage.output_tokens if usage else None,
+                estimated_cost=usage.estimated_cost if usage else None,
+                outcome="success",
+                retries=usage.retries if usage else 0,
+            )
+            return execution
+
+    def _investigate(
         self, request: EvaluatedRunRequest, environment: InvestigationEnvironment
     ) -> InvestigatorExecution:
         authorized: dict[str, str] = {
@@ -444,10 +499,18 @@ def _usage_from_stdout(
         for line in stdout.splitlines()
         for item in [_json_object(line)]
     )
+    retry_events = sum(
+        isinstance(item, dict)
+        and isinstance(item.get("type"), str)
+        and "retry" in item["type"].casefold()
+        for line in stdout.splitlines()
+        for item in [_json_object(line)]
+    )
     return InvestigatorUsage(
         input_tokens=int(values["input_tokens"]) if "input_tokens" in values else None,
         output_tokens=int(values["output_tokens"]) if "output_tokens" in values else None,
         estimated_cost=values.get("estimated_cost", values.get("cost")),
+        retries=retry_events,
         steps=step_events,
         mcp_calls=mcp_calls,
         incident_id=request.incident_id,

@@ -22,7 +22,7 @@ from incident_investigation_harness.quality_gate import (EvidenceSet,
                                                          RetryStormOracle)
 from incident_investigation_harness.report import InvestigationReport
 from incident_investigation_harness.scenarios import ScenarioName
-from incident_investigation_harness.telemetry import span, telemetry
+from incident_investigation_harness.telemetry import record_report_collection, span, telemetry
 
 
 class EvaluatedRunRequest(BaseModel):
@@ -33,6 +33,8 @@ class EvaluatedRunRequest(BaseModel):
     scenario: ScenarioName
     incident_id: uuid.UUID
     investigation_run_id: uuid.UUID
+    model_version: str = "unknown"
+    prompt_version: str = "unknown"
     limits: "RunLimits" = Field(default_factory=lambda: RunLimits())
 
     @property
@@ -74,6 +76,7 @@ class InvestigatorUsage(BaseModel):
     input_tokens: int | None = Field(default=None, ge=0)
     output_tokens: int | None = Field(default=None, ge=0)
     estimated_cost: float | None = Field(default=None, ge=0)
+    retries: int = Field(default=0, ge=0)
     steps: int = Field(default=0, ge=0)
     mcp_calls: int = Field(default=0, ge=0)
     elapsed_seconds: float = Field(default=0, ge=0)
@@ -265,6 +268,10 @@ class EvaluatedRunRunner:
             component="runner",
             operation="run",
             scenario=request.scenario.value,
+            attributes={
+                "model_version": request.model_version,
+                "prompt_version": request.prompt_version,
+            },
         ):
             try:
                 self._artifact_store.start(request.context)
@@ -295,7 +302,21 @@ class EvaluatedRunRunner:
                             category="resource-limit", usage=usage, limit=exceeded,
                         )
                     self._artifact_store.record(_events_artifact(request.context, events))
-                    self._artifact_store.record(_report_artifact(request.context, execution.report))
+                    with span(
+                        "investigation-report-collection",
+                        context=request.context,
+                        component="runner",
+                        operation="report.collect",
+                        scenario=request.scenario.value,
+                    ):
+                        self._artifact_store.record(_report_artifact(request.context, execution.report))
+                        report_size = len(execution.report.model_dump_json().encode("utf-8"))
+                        record_report_collection(
+                            context=request.context,
+                            scenario=request.scenario.value,
+                            size_bytes=report_size,
+                            claim_count=len(execution.report.factual_claims),
+                        )
                     evidence_set = self._get_evidence_set(request)
                     self._artifact_store.record(_evidence_artifact(request.context, evidence_set))
                     quality_gate = QualityGate.evaluate(

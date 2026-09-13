@@ -325,12 +325,17 @@ An execution failure never becomes an approval because evidence is missing. Like
 
 ## 11. Observability and audit
 
-The components record events and operational signals so that an Investigation Run can be understood afterward. Correlation uses the run identifiers.
+The components record events and operational signals so that an Investigation Run can be understood afterward. Correlation uses the run identifiers. AI-specific telemetry adds model execution and report-collection spans plus bounded metrics for model/prompt versions, latency, failure category, MCP activity, report size, optional token/cost usage, Quality Gate verdicts and citation failures. Token and cost metrics explicitly record `available` or `unavailable`; prompts, Oracle contents, credentials and Untrusted Evidence payloads are never emitted. Exception spans retain only the exception type and status.
 
 The local Compose stack sends OTLP spans and metrics to the OpenTelemetry Collector.
 The Collector forwards traces to Jaeger and exposes aggregated metrics for Prometheus;
-Grafana provisions a dashboard for run duration/failures, notification backlog and
-Retry Storm retries. The API exposes `/metrics` for scrape-based development checks.
+Grafana provisions a dashboard for run duration/failures, AI model latency and usage,
+approval/citation outcomes, notification backlog and Retry Storm retries. Useful
+Prometheus queries include `histogram_quantile(0.95, sum(rate(investigation_model_duration_bucket[5m])) by (le))`
+for model p95 latency, `sum(rate(quality_gate_verdicts_total{verdict="approved"}[5m])) /
+clamp_min(sum(rate(quality_gate_verdicts_total[5m])), 1)` for approval rate, and
+`sum(rate(investigation_model_usage_total{availability="unavailable"}[5m]))` for
+missing provider usage data. The API exposes `/metrics` for scrape-based development checks.
 Exporter failures are deliberately non-fatal: the business flow, Evidence Providers
 and Quality Gate continue and JSONL/artifact audit remains available. Metrics use only
 bounded labels; `incident_id` and `investigation_run_id` are span/event correlation
