@@ -40,6 +40,33 @@ class Telemetry:
         self.run_duration = meter.create_histogram(
             "investigation_run_duration", unit="s"
         )
+        self.model_executions = meter.create_counter(
+            "investigation_model_executions", unit="{execution}"
+        )
+        self.model_duration = meter.create_histogram(
+            "investigation_model_duration", unit="s"
+        )
+        self.model_input_tokens = meter.create_counter(
+            "investigation_model_input_tokens", unit="{token}"
+        )
+        self.model_output_tokens = meter.create_counter(
+            "investigation_model_output_tokens", unit="{token}"
+        )
+        self.model_cost = meter.create_counter(
+            "investigation_model_cost", unit="{currency}"
+        )
+        self.model_usage = meter.create_counter(
+            "investigation_model_usage", unit="{observation}"
+        )
+        self.model_retries = meter.create_counter(
+            "investigation_model_retries", unit="{retry}"
+        )
+        self.reports_collected = meter.create_counter(
+            "investigation_reports_collected", unit="{report}"
+        )
+        self.report_size = meter.create_histogram(
+            "investigation_report_size", unit="By"
+        )
         self.provider_queries = meter.create_counter(
             "evidence_provider_queries", unit="{query}"
         )
@@ -52,6 +79,12 @@ class Telemetry:
         self.quality_gate_calls = meter.create_counter("quality_gate_calls", unit="{call}")
         self.quality_gate_duration = meter.create_histogram(
             "quality_gate_duration", unit="s"
+        )
+        self.quality_gate_verdicts = meter.create_counter(
+            "quality_gate_verdicts", unit="{verdict}"
+        )
+        self.quality_gate_citation_failures = meter.create_counter(
+            "quality_gate_citation_failures", unit="{failure}"
         )
         self.tickets_created = meter.create_counter("tickets_created", unit="{ticket}")
         self.notifications = meter.create_counter("notifications_total", unit="{notification}")
@@ -150,17 +183,69 @@ def span(
     )
     if attributes:
         safe_attributes.update(attributes)
-    with tracer.start_as_current_span(name, attributes=safe_attributes) as current:
+    with tracer.start_as_current_span(
+        name,
+        attributes=safe_attributes,
+        record_exception=False,
+        set_status_on_exception=False,
+    ) as current:
         try:
             yield current
         except Exception as error:
-            current.record_exception(error)
+            # Exception messages can contain prompts, credentials or retrieved
+            # evidence. The exception type is enough for operational tracing.
             current.set_status(Status(StatusCode.ERROR, type(error).__name__))
             raise
 
 
 def mark_success(current: Span) -> None:
     current.set_status(Status(StatusCode.OK))
+
+
+def record_model_execution(
+    *,
+    context: object,
+    scenario: str,
+    model_version: str,
+    prompt_version: str,
+    duration_seconds: float,
+    input_tokens: int | None,
+    output_tokens: int | None,
+    estimated_cost: float | None,
+    outcome: str,
+    failure_category: str | None = None,
+    retries: int = 0,
+) -> None:
+    """Record provider-neutral model telemetry without recording model content."""
+    labels = {
+        "scenario": scenario,
+        "model_version": model_version,
+        "prompt_version": prompt_version,
+        "outcome": outcome,
+    }
+    if failure_category is not None:
+        labels["failure_category"] = failure_category
+    telemetry.model_executions.add(1, labels)
+    telemetry.model_duration.record(duration_seconds, labels)
+    usage_available = input_tokens is not None or output_tokens is not None or estimated_cost is not None
+    telemetry.model_usage.add(1, {**labels, "availability": "available" if usage_available else "unavailable"})
+    if input_tokens is not None:
+        telemetry.model_input_tokens.add(input_tokens, labels)
+    if output_tokens is not None:
+        telemetry.model_output_tokens.add(output_tokens, labels)
+    if estimated_cost is not None:
+        telemetry.model_cost.add(estimated_cost, labels)
+    if retries:
+        telemetry.model_retries.add(retries, labels)
+
+
+def record_report_collection(
+    *, context: object, scenario: str, size_bytes: int, claim_count: int
+) -> None:
+    """Record report shape and size; never record report text or citations."""
+    labels = {"scenario": scenario}
+    telemetry.reports_collected.add(1, labels)
+    telemetry.report_size.record(size_bytes, {**labels, "claims": str(claim_count)})
 
 
 def instrument_evidence_query(provider: str, operation: str) -> Callable[[Callable[P, R]], Callable[P, R]]:

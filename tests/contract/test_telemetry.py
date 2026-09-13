@@ -16,6 +16,8 @@ from incident_investigation_harness.telemetry import (
     Telemetry,
     context_attributes,
     configure_telemetry,
+    record_model_execution,
+    record_report_collection,
     span,
 )
 
@@ -73,6 +75,10 @@ def test_span_records_failure_without_leaking_exception_details_to_attributes() 
     finished = exporter.get_finished_spans()[0]
     assert finished.status.status_code.name == "ERROR"
     assert all("token=must-not" not in str(value) for value in finished.attributes.values())
+    assert all(
+        "token=must-not" not in str(event.attributes)
+        for event in finished.events
+    )
 
 
 def test_metrics_endpoint_is_available_without_observability_backends() -> None:
@@ -99,3 +105,47 @@ def test_context_attributes_are_bounded_and_explicit() -> None:
     assert set(attributes) == {
         "component", "operation", "incident_id", "investigation_run_id", "scenario"
     }
+
+
+def test_ai_telemetry_marks_optional_usage_as_unavailable_and_keeps_correlation_on_span() -> None:
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    application_telemetry = configure_telemetry(
+        service_name="ai-test",
+        tracer_provider=provider,
+        meter_provider=MeterProvider(metric_readers=[InMemoryMetricReader()]),
+    )
+    context = InvestigationContext(incident_id=uuid.uuid4(), investigation_run_id=uuid.uuid4())
+
+    with span(
+        "investigation-model-execution",
+        context=context,
+        component="codex-investigator",
+        operation="model.execute",
+        attributes={"model_version": "test-model", "prompt_version": "prompt-v1"},
+    ):
+        record_model_execution(
+            context=context,
+            scenario="retry-storm",
+            model_version="test-model",
+            prompt_version="prompt-v1",
+            duration_seconds=0.25,
+            input_tokens=None,
+            output_tokens=None,
+            estimated_cost=None,
+            outcome="success",
+        )
+        record_report_collection(
+            context=context,
+            scenario="retry-storm",
+            size_bytes=512,
+            claim_count=2,
+        )
+
+    finished = exporter.get_finished_spans()[0]
+    assert dict(finished.attributes)["incident_id"] == str(context.incident_id)
+    assert dict(finished.attributes)["prompt_version"] == "prompt-v1"
+    assert "estimated_cost" not in finished.attributes
+    assert "evidence" not in str(finished.attributes).casefold()
+    assert application_telemetry.model_usage is not None
