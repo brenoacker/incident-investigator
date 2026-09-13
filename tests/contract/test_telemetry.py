@@ -140,7 +140,6 @@ def test_ai_telemetry_marks_optional_usage_as_unavailable_and_keeps_correlation_
             context=context,
             scenario="retry-storm",
             size_bytes=512,
-            claim_count=2,
         )
 
     finished = exporter.get_finished_spans()[0]

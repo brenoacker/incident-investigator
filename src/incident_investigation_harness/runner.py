@@ -315,7 +315,6 @@ class EvaluatedRunRunner:
                             context=request.context,
                             scenario=request.scenario.value,
                             size_bytes=report_size,
-                            claim_count=len(execution.report.factual_claims),
                         )
                     evidence_set = self._get_evidence_set(request)
                     self._artifact_store.record(_evidence_artifact(request.context, evidence_set))
