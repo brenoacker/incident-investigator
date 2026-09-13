@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import io
 import uuid
 from pathlib import Path
 import subprocess
@@ -17,6 +18,8 @@ from incident_investigation_harness.report import InvestigationReport
 from incident_investigation_harness.runner import (
     EvaluatedRunRequest,
     EvaluatedRunRunner,
+    InvestigatorExecutionFailure,
+    RunLimits,
 )
 from incident_investigation_harness.scenarios import ScenarioName
 
@@ -207,6 +210,110 @@ def test_codex_provider_detection_handles_cli_event_shapes() -> None:
     assert _query_provider({"item": {"name": "query_source_evidence"}}) == "source-mcp"
     assert _query_provider({"item": {"server": "knowledge-mcp"}}) == "knowledge-mcp"
     assert _query_provider({"name": "unrelated_tool"}) is None
+
+
+@pytest.mark.parametrize(
+    ("limits", "usage"),
+    [
+        (RunLimits(max_tokens=10), {"input_tokens": 6, "output_tokens": 5}),
+        (RunLimits(max_cost=0.01), {"estimated_cost": 0.02}),
+    ],
+)
+def test_codex_adapter_reports_token_and_cost_budget_exhaustion(
+    limits: RunLimits, usage: dict[str, float]
+) -> None:
+    request = _request().model_copy(update={"limits": limits})
+
+    def over_budget(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        output = Path(command[command.index("--output-last-message") + 1])
+        output.write_text(json.dumps(_report(request).model_dump(mode="json")), encoding="utf-8")
+        return subprocess.CompletedProcess(command, 0, stdout=json.dumps({"usage": usage}), stderr="")
+
+    result = EvaluatedRunRunner(
+        CodexInvestigatorAdapter({"incident-mcp": "http://incident.test/mcp"}, command_runner=over_budget),
+        sandbox=InvestigationSandbox(allowed_evidence_providers=("incident-mcp",)),
+    ).run(request)
+
+    assert result.execution_failure is not None
+    assert result.execution_failure.category == "resource-limit"
+    assert result.execution_failure.limit in {"tokens", "cost"}
+    assert result.execution_failure.usage is not None
+    assert result.execution_failure.usage.incident_id == request.incident_id
+    assert result.events
+
+
+def test_codex_adapter_counts_turns_separately_from_mcp_calls() -> None:
+    request = _request().model_copy(update={"limits": RunLimits(max_steps=1)})
+
+    def over_steps(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        output = Path(command[command.index("--output-last-message") + 1])
+        output.write_text(json.dumps(_report(request).model_dump(mode="json")), encoding="utf-8")
+        lines = [
+            {"type": "turn.started"},
+            {"type": "turn.completed"},
+            {"type": "turn.started"},
+            {"type": "turn.completed"},
+            {"type": "mcp_tool_call", "server": "incident-mcp", "arguments": {
+                "incident_id": str(request.incident_id),
+                "investigation_run_id": str(request.investigation_run_id),
+            }},
+        ]
+        return subprocess.CompletedProcess(command, 0, stdout="\n".join(json.dumps(line) for line in lines), stderr="")
+
+    result = EvaluatedRunRunner(
+        CodexInvestigatorAdapter({"incident-mcp": "http://incident.test/mcp"}, command_runner=over_steps),
+        sandbox=InvestigationSandbox(allowed_evidence_providers=("incident-mcp",)),
+    ).run(request)
+
+    assert result.execution_failure is not None
+    assert result.execution_failure.category == "resource-limit"
+    assert result.execution_failure.limit == "steps"
+    assert result.execution_failure.usage is not None
+    assert result.execution_failure.usage.steps == 2
+    assert result.execution_failure.usage.mcp_calls == 1
+
+
+def test_codex_streaming_path_stops_before_processing_more_than_mcp_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    request = _request().model_copy(update={"limits": RunLimits(max_mcp_calls=1)})
+    query = json.dumps({
+        "type": "mcp_tool_call", "server": "incident-mcp",
+        "arguments": {
+            "incident_id": str(request.incident_id),
+            "investigation_run_id": str(request.investigation_run_id),
+        },
+    })
+
+    class Process:
+        def __init__(self) -> None:
+            self.stdout = io.StringIO(f"{query}\n{query}\n")
+            self.stderr = io.StringIO("")
+            self.stdin = io.StringIO()
+            self.returncode = 0
+            self.killed = False
+
+        def poll(self) -> int | None:
+            return -9 if self.killed else None
+
+        def kill(self) -> None:
+            self.killed = True
+
+        def wait(self) -> int:
+            return self.returncode
+
+    process = Process()
+    monkeypatch.setattr(
+        "incident_investigation_harness.adapters.codex.subprocess.Popen",
+        lambda *args, **kwargs: process,
+    )
+
+    with pytest.raises(InvestigatorExecutionFailure) as raised:
+        CodexInvestigatorAdapter({"incident-mcp": "http://incident.test/mcp"}).investigate(
+            request, InvestigationSandbox(allowed_evidence_providers=("incident-mcp",)).prepare(request.context)
+        )
+
+    assert raised.value.category == "resource-limit"
+    assert raised.value.limit == "mcp-calls"
+    assert process.killed
 
 
 @pytest.mark.parametrize(

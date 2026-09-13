@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import json
 import os
+from queue import Empty, Queue
 import subprocess
 import tempfile
+from threading import Thread
+from time import monotonic
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, cast
@@ -67,21 +70,7 @@ class CodexInvestigatorAdapter:
                 request, authorized, schema_path, output_path, prompt
             )
             try:
-                completed = self._command_runner(
-                    command,
-                    cwd=str(root),
-                    env=_child_environment(),
-                    text=True,
-                    capture_output=True,
-                    check=False,
-                    timeout=min(
-                        self._timeout_seconds,
-                        request.limits.max_duration_seconds
-                        if request.limits.max_duration_seconds is not None
-                        else self._timeout_seconds,
-                    ),
-                    input=prompt,
-                )
+                completed = self._run_cli(command, root, prompt, request, environment, events)
             except ConnectionError as error:
                 events.append(self._event(request, "investigation.failed", {"error": str(error)}))
                 raise InvestigatorExecutionFailure(
@@ -89,15 +78,25 @@ class CodexInvestigatorAdapter:
                 ) from error
             except subprocess.TimeoutExpired as error:
                 events.append(self._event(request, "investigation.failed", {"error": str(error)}))
+                partial = error.output if isinstance(error.output, str) else ""
+                usage = _usage_from_stdout(partial, sum(
+                    event.event_type == "investigation.query" for event in events
+                ), request).model_copy(update={"elapsed_seconds": self._timeout_seconds})
                 raise InvestigatorExecutionFailure(
                     str(error), tuple(events),
                     category=("resource-limit" if request.limits.max_duration_seconds is not None else "cli-interrupted"),
                     limit=("time" if request.limits.max_duration_seconds is not None else None),
+                    usage=usage,
                 ) from error
             except OSError as error:
                 events.append(self._event(request, "investigation.failed", {"error": str(error)}))
                 raise InvestigatorExecutionFailure(
                     str(error), tuple(events), category="cli-interrupted"
+                ) from error
+            except ValueError as error:
+                events.append(self._event(request, "investigation.failed", {"error": str(error)}))
+                raise InvestigatorExecutionFailure(
+                    str(error), tuple(events), category="invalid-output"
                 ) from error
 
             try:
@@ -109,19 +108,15 @@ class CodexInvestigatorAdapter:
                 ) from error
             observed_calls = sum(event.event_type == "investigation.query" for event in events)
             observed_usage = _usage_from_stdout(completed.stdout, observed_calls, request)
-            for limit_name, limit, observed in (
-                ("mcp-calls", request.limits.max_mcp_calls, observed_calls),
-                ("steps", request.limits.max_steps, observed_calls),
-            ):
-                if limit is not None and observed > limit:
-                    events.append(self._event(request, "investigation.failed", {
-                        "limit": limit_name, "observed": observed,
-                    }))
-                    raise InvestigatorExecutionFailure(
-                        f"resource limit exhausted: {limit_name}", tuple(events),
-                        category="resource-limit", limit=limit_name,
-                        usage=observed_usage,
-                    )
+            exceeded = _first_exceeded_limit(request, observed_usage, fail_unknown=True)
+            if exceeded is not None:
+                events.append(self._event(request, "investigation.failed", {
+                    "limit": exceeded, "usage": observed_usage.model_dump(mode="json"),
+                }))
+                raise InvestigatorExecutionFailure(
+                    f"resource limit exhausted: {exceeded}", tuple(events),
+                    category="resource-limit", limit=exceeded, usage=observed_usage,
+                )
             if completed.returncode != 0:
                 events.append(
                     self._event(
@@ -158,6 +153,86 @@ class CodexInvestigatorAdapter:
             event.event_type == "investigation.query" for event in events
         ), request)
         return InvestigatorExecution(report=report, events=tuple(events), usage=usage)
+
+    def _run_cli(
+        self,
+        command: list[str],
+        root: Path,
+        prompt: str,
+        request: EvaluatedRunRequest,
+        environment: InvestigationEnvironment,
+        events: list[InvestigationEvent],
+    ) -> subprocess.CompletedProcess[str]:
+        timeout = min(
+            self._timeout_seconds,
+            request.limits.max_duration_seconds
+            if request.limits.max_duration_seconds is not None
+            else self._timeout_seconds,
+        )
+        if self._command_runner is not subprocess.run:
+            return self._command_runner(
+                command, cwd=str(root), env=_child_environment(), text=True,
+                capture_output=True, check=False, timeout=timeout, input=prompt,
+            )
+
+        process = subprocess.Popen(
+            command, cwd=str(root), env=_child_environment(), text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.PIPE,
+        )
+        assert process.stdout is not None
+        assert process.stderr is not None
+        assert process.stdin is not None
+        process.stdin.write(prompt)
+        process.stdin.close()
+        lines: list[str] = []
+        queue: Queue[str | None] = Queue()
+
+        def read_stdout() -> None:
+            assert process.stdout is not None
+            for line in process.stdout:
+                queue.put(line)
+            queue.put(None)
+
+        Thread(target=read_stdout, daemon=True).start()
+        deadline = monotonic() + timeout
+        try:
+            while True:
+                remaining = deadline - monotonic()
+                if remaining <= 0:
+                    process.kill()
+                    process.wait()
+                    raise subprocess.TimeoutExpired(command, timeout, output="".join(lines))
+                try:
+                    line = queue.get(timeout=remaining)
+                except Empty:
+                    process.kill()
+                    process.wait()
+                    raise subprocess.TimeoutExpired(command, timeout, output="".join(lines))
+                if line is None:
+                    break
+                lines.append(line)
+                events.extend(self._stream_events(request, environment, line))
+                usage = _usage_from_stdout("".join(lines), sum(
+                    event.event_type == "investigation.query" for event in events
+                ), request)
+                exceeded = _first_exceeded_limit(request, usage, fail_unknown=False)
+                if exceeded is not None:
+                    process.kill()
+                    process.wait()
+                    events.append(self._event(request, "investigation.failed", {
+                        "limit": exceeded, "usage": usage.model_dump(mode="json"),
+                    }))
+                    raise InvestigatorExecutionFailure(
+                        f"resource limit exhausted: {exceeded}", tuple(events),
+                        category="resource-limit", limit=exceeded, usage=usage,
+                    )
+            returncode = process.wait()
+            stderr = process.stderr.read()
+            return subprocess.CompletedProcess(command, returncode, "".join(lines), stderr)
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
 
     def _command(
         self,
@@ -359,7 +434,7 @@ def _usage_from_stdout(
         isinstance(item, dict)
         and isinstance(item.get("type"), str)
         and "turn" in item["type"]
-        and ("started" in item["type"] or "completed" in item["type"])
+        and "started" in item["type"]
         for line in stdout.splitlines()
         for item in [_json_object(line)]
     )
@@ -367,11 +442,29 @@ def _usage_from_stdout(
         input_tokens=int(values["input_tokens"]) if "input_tokens" in values else None,
         output_tokens=int(values["output_tokens"]) if "output_tokens" in values else None,
         estimated_cost=values.get("estimated_cost", values.get("cost")),
-        steps=step_events or mcp_calls,
+        steps=step_events,
         mcp_calls=mcp_calls,
         incident_id=request.incident_id,
         investigation_run_id=request.investigation_run_id,
     )
+
+
+def _first_exceeded_limit(
+    request: EvaluatedRunRequest,
+    usage: InvestigatorUsage,
+    *,
+    fail_unknown: bool,
+) -> str | None:
+    checks = (
+        ("mcp-calls", request.limits.max_mcp_calls, usage.mcp_calls),
+        ("steps", request.limits.max_steps, usage.steps),
+        ("tokens", request.limits.max_tokens, usage.total_tokens),
+        ("cost", request.limits.max_cost, usage.estimated_cost),
+    )
+    for name, limit, observed in checks:
+        if limit is not None and (observed is None and fail_unknown or observed is not None and observed > limit):
+            return name
+    return None
 
 
 def _json_object(line: str) -> object:
