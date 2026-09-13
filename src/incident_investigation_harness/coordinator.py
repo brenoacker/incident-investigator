@@ -20,6 +20,7 @@ from incident_investigation_harness.runner import (
     InvestigationEvent,
     InvestigatorExecution,
     InvestigatorExecutionFailure,
+    InvestigatorUsage,
 )
 
 
@@ -248,10 +249,27 @@ class CoordinatorInvestigatorAdapter:
     def investigate(
         self, request: EvaluatedRunRequest, environment: InvestigationEnvironment
     ) -> InvestigatorExecution:
+        configured_limits = tuple(
+            value for value in (request.limits.max_steps, request.limits.max_mcp_calls)
+            if value is not None
+        )
+        if any(value == 0 for value in configured_limits):
+            limit = "steps" if request.limits.max_steps == 0 else "mcp-calls"
+            raise InvestigatorExecutionFailure(
+                f"resource limit exhausted: {limit}", category="resource-limit",
+                usage=InvestigatorUsage(), limit=limit,
+            )
         coordinator = InvestigationCoordinator(
             self._query,
             authorized_providers=environment.allowed_evidence_providers,
-            max_queries=self._max_queries,
+            max_queries=min([
+                self._max_queries,
+                *(
+                    value for value in (
+                        request.limits.max_steps, request.limits.max_mcp_calls
+                    ) if value is not None
+                ),
+            ]),
             synthesize=self._synthesize,
         )
         try:
@@ -274,13 +292,28 @@ class CoordinatorInvestigatorAdapter:
                     else "provider-unavailable"
                 ),
             )
+        usage = InvestigatorUsage(
+            steps=sum(stage.stage is InvestigationStage.EVIDENCE_GATHERING for stage in result.stages),
+            mcp_calls=len(result.results),
+        )
+        if result.stop_reason == "limit-exhausted":
+            limit = "steps"
+            if request.limits.max_mcp_calls is not None and (
+                request.limits.max_steps is None
+                or request.limits.max_mcp_calls < request.limits.max_steps
+            ):
+                limit = "mcp-calls"
+            raise InvestigatorExecutionFailure(
+                f"resource limit exhausted: {limit}", result.events,
+                category="resource-limit", usage=usage, limit=limit,
+            )
         if result.report is None:
             raise InvestigatorExecutionFailure(
                 "coordinator produced no Investigation Report",
                 result.events,
                 category="report-missing",
             )
-        return InvestigatorExecution(report=result.report, events=result.events)
+        return InvestigatorExecution(report=result.report, events=result.events, usage=usage)
 
 
 def _validate_synthesized_report(

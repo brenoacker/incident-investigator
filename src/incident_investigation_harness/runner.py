@@ -33,6 +33,7 @@ class EvaluatedRunRequest(BaseModel):
     scenario: ScenarioName
     incident_id: uuid.UUID
     investigation_run_id: uuid.UUID
+    limits: "RunLimits" = Field(default_factory=lambda: RunLimits())
 
     @property
     def context(self) -> InvestigationContext:
@@ -40,6 +41,18 @@ class EvaluatedRunRequest(BaseModel):
             incident_id=self.incident_id,
             investigation_run_id=self.investigation_run_id,
         )
+
+
+class RunLimits(BaseModel):
+    """Optional hard resource budgets for one evaluated Investigation Run."""
+
+    model_config = ConfigDict(frozen=True)
+
+    max_duration_seconds: float | None = Field(default=None, ge=0)
+    max_steps: int | None = Field(default=None, ge=0)
+    max_mcp_calls: int | None = Field(default=None, ge=0)
+    max_tokens: int | None = Field(default=None, ge=0)
+    max_cost: float | None = Field(default=None, ge=0)
 
 
 class InvestigationEvent(BaseModel):
@@ -61,6 +74,11 @@ class InvestigatorUsage(BaseModel):
     input_tokens: int | None = Field(default=None, ge=0)
     output_tokens: int | None = Field(default=None, ge=0)
     estimated_cost: float | None = Field(default=None, ge=0)
+    steps: int = Field(default=0, ge=0)
+    mcp_calls: int = Field(default=0, ge=0)
+    elapsed_seconds: float = Field(default=0, ge=0)
+    incident_id: uuid.UUID | None = None
+    investigation_run_id: uuid.UUID | None = None
 
     @property
     def total_tokens(self) -> int | None:
@@ -88,10 +106,14 @@ class InvestigatorExecutionFailure(RuntimeError):
         events: tuple[InvestigationEvent, ...] = (),
         *,
         category: str = "investigator-error",
+        usage: InvestigatorUsage | None = None,
+        limit: str | None = None,
     ) -> None:
         super().__init__(message)
         self.events = events
         self.category = category
+        self.usage = usage
+        self.limit = limit
 
 
 class InvestigatorAdapter(Protocol):
@@ -109,6 +131,7 @@ ExecutionFailureCategory = Literal[
     "report-missing",
     "investigator-error",
     "runner-error",
+    "resource-limit",
 ]
 
 
@@ -157,6 +180,8 @@ class ExecutionFailure(BaseModel):
     category: ExecutionFailureCategory
     cause: str = Field(min_length=1)
     artifacts: tuple[RunArtifact, ...] = ()
+    limit: str | None = None
+    usage: InvestigatorUsage | None = None
 
     @property
     def error_type(self) -> str:
@@ -167,6 +192,11 @@ class ExecutionFailure(BaseModel):
     def message(self) -> str:
         """Compatibility alias for the failure cause."""
         return self.cause
+
+    @property
+    def observed_usage(self) -> InvestigatorUsage | None:
+        """Explicit alias for the usage observed when the failure occurred."""
+        return self.usage
 
 
 @dataclass(frozen=True)
@@ -240,8 +270,30 @@ class EvaluatedRunRunner:
                 self._artifact_store.start(request.context)
                 try:
                     environment = self._sandbox_for(request).prepare(request.context)
+                    zero_limit = (
+                        "steps" if request.limits.max_steps == 0
+                        else "mcp-calls" if request.limits.max_mcp_calls == 0
+                        else "time" if request.limits.max_duration_seconds == 0
+                        else None
+                    )
+                    if zero_limit is not None:
+                        raise InvestigatorExecutionFailure(
+                            f"resource limit exhausted: {zero_limit}",
+                            category="resource-limit", limit=zero_limit,
+                            usage=_usage_for_request(InvestigatorUsage(), request),
+                        )
                     execution = self._investigator.investigate(request, environment)
                     events = _validate_events(execution.events, request)
+                    elapsed = perf_counter() - started
+                    usage = _observed_usage(execution.usage, events, request).model_copy(
+                        update={"elapsed_seconds": elapsed}
+                    )
+                    exceeded = _exceeded_limit(request.limits, usage, elapsed)
+                    if exceeded is not None:
+                        raise InvestigatorExecutionFailure(
+                            f"resource limit exhausted: {exceeded}", events,
+                            category="resource-limit", usage=usage, limit=exceeded,
+                        )
                     self._artifact_store.record(_events_artifact(request.context, events))
                     self._artifact_store.record(_report_artifact(request.context, execution.report))
                     evidence_set = self._get_evidence_set(request)
@@ -260,11 +312,19 @@ class EvaluatedRunRunner:
                         events = ()
                     if events:
                         self._artifact_store.record(_events_artifact(request.context, events))
+                    failure_usage = error.usage
+                    if error.category == "resource-limit":
+                        failure_usage = _usage_for_request(
+                            failure_usage or InvestigatorUsage(), request
+                        ).model_copy(
+                            update={"elapsed_seconds": perf_counter() - started}
+                        )
                     telemetry.runs_failed.add(1, {"scenario": request.scenario.value, "category": _failure_category(error.category)})
                     return EvaluatedRunResult(
                         request=request, report=None, events=events, quality_gate=None,
                         execution_failure=ExecutionFailure(
                             category=_failure_category(error.category), cause=str(error) or "unknown error",
+                            limit=error.limit, usage=failure_usage,
                             artifacts=self._artifact_store.for_run(request.context),
                         ), isolation_probes=(), artifacts=self._artifact_store.for_run(request.context),
                         duration_seconds=perf_counter() - started,
@@ -286,7 +346,7 @@ class EvaluatedRunRunner:
                     isolation_probes=environment.isolation_probes,
                     artifacts=self._artifact_store.for_run(request.context),
                     duration_seconds=perf_counter() - started,
-                    usage=execution.usage,
+                    usage=usage,
                 )
             finally:
                 telemetry.run_duration.record(
@@ -344,9 +404,50 @@ def _failure_category(category: str) -> ExecutionFailureCategory:
         "invalid-output",
         "report-missing",
         "investigator-error",
+        "resource-limit",
     }:
         return category  # type: ignore[return-value]
     return "investigator-error"
+
+
+def _observed_usage(
+    usage: InvestigatorUsage | None,
+    events: tuple[InvestigationEvent, ...],
+    request: EvaluatedRunRequest,
+) -> InvestigatorUsage:
+    """Fill adapter usage gaps with observations from the scoped audit stream."""
+    calls = sum(event.event_type == "investigation.query" for event in events)
+    steps = sum(event.event_type in {
+        "investigation.planning", "investigation.evidence-gathering", "investigation.synthesis"
+    } for event in events)
+    steps = max(steps, calls)
+    if usage is None:
+        usage = InvestigatorUsage(steps=steps, mcp_calls=calls)
+    usage = usage.model_copy(update={"steps": max(usage.steps, steps), "mcp_calls": max(usage.mcp_calls, calls)})
+    return _usage_for_request(usage, request)
+
+
+def _usage_for_request(usage: InvestigatorUsage, request: EvaluatedRunRequest) -> InvestigatorUsage:
+    return usage.model_copy(update={
+        "incident_id": request.incident_id,
+        "investigation_run_id": request.investigation_run_id,
+    })
+
+
+def _exceeded_limit(
+    limits: RunLimits, usage: InvestigatorUsage, duration_seconds: float
+) -> str | None:
+    checks = (
+        ("time", limits.max_duration_seconds, duration_seconds),
+        ("steps", limits.max_steps, usage.steps),
+        ("mcp-calls", limits.max_mcp_calls, usage.mcp_calls),
+        ("tokens", limits.max_tokens, usage.total_tokens),
+        ("cost", limits.max_cost, usage.estimated_cost),
+    )
+    for name, limit, observed in checks:
+        if limit is not None and (observed is None or observed > limit):
+            return name
+    return None
 
 
 def _events_artifact(

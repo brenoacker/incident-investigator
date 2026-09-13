@@ -42,6 +42,7 @@ def test_codex_adapter_hands_off_exact_context_and_allowlisted_mcp_config() -> N
                         "incident_id": str(request.incident_id),
                         "investigation_run_id": str(request.investigation_run_id),
                     },
+                    "usage": {"input_tokens": 12, "output_tokens": 8, "estimated_cost": 0.03},
                 }
             ),
             stderr="",
@@ -69,6 +70,10 @@ def test_codex_adapter_hands_off_exact_context_and_allowlisted_mcp_config() -> N
     )
     assert all("operations-mcp" not in item for item in command)
     assert execution.report == _report(request)
+    assert execution.usage is not None
+    assert execution.usage.input_tokens == 12
+    assert execution.usage.output_tokens == 8
+    assert execution.usage.estimated_cost == 0.03
     assert {event.event_type for event in execution.events} == {
         "investigation.started",
         "investigation.query",

@@ -155,6 +155,15 @@ flowchart TD
 
 During the investigation, Codex does not receive the Incident Oracle, access PostgreSQL or Redis directly, or receive write, simulation, administration or evaluation tools. The effective sandbox verifies these denials and exposes only its configured `AllowedEvidenceProviders`; the Oracle is used only afterward by the separate evaluation process.
 
+Each `EvaluatedRunRequest` may also carry a `RunLimits` budget for elapsed time,
+investigation steps, MCP calls, total model tokens and estimated cost. The runner
+checks observed adapter usage and scoped audit events before invoking the Quality
+Gate. Exhaustion produces a typed `resource-limit` execution failure, retains the
+run's events and usage, and never evaluates a partial report as an approval. The
+coordinator applies step and MCP-call budgets before scheduling follow-up queries;
+the Codex adapter applies the time budget to the CLI timeout and audits observed
+MCP calls.
+
 ## 7. Codex investigation with MCPs
 
 Codex starts with the incident ticket and queries the sources it needs. Each source returns data and stable Evidence Citations, always scoped to the `incident_id` and `investigation_run_id` of the run.

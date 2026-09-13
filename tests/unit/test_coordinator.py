@@ -20,7 +20,7 @@ from incident_investigation_harness.report import (
     Confidence, FactualClaim, InvestigationReport, Mitigation
 )
 from incident_investigation_harness.quality_gate import EvidenceSet
-from incident_investigation_harness.runner import EvaluatedRunRequest, EvaluatedRunRunner
+from incident_investigation_harness.runner import EvaluatedRunRequest, EvaluatedRunRunner, RunLimits
 from incident_investigation_harness.scenarios import ScenarioName
 
 
@@ -132,6 +132,27 @@ def test_coordinator_adapter_runs_through_the_evaluated_run_runner() -> None:
         "investigation.synthesis",
         "investigation.completed",
     ]
+
+
+def test_coordinator_zero_query_budget_is_a_resource_limit_failure() -> None:
+    request = EvaluatedRunRequest(
+        scenario=ScenarioName.RETRY_STORM,
+        incident_id=uuid.uuid4(),
+        investigation_run_id=uuid.uuid4(),
+        limits=RunLimits(max_mcp_calls=0),
+    )
+    adapter = CoordinatorInvestigatorAdapter(
+        planner=lambda received, environment: pytest.fail("planner must not run"),
+        query=lambda query: pytest.fail("query must not run"),
+        follow_up=lambda gaps: (),
+        synthesize=lambda context, results: pytest.fail("synthesis must not run"),
+    )
+
+    result = EvaluatedRunRunner(adapter).run(request)
+
+    assert result.execution_failure is not None
+    assert result.execution_failure.category == "resource-limit"
+    assert result.execution_failure.limit == "mcp-calls"
 
 
 def test_synthesis_cannot_introduce_uncited_evidence() -> None:
