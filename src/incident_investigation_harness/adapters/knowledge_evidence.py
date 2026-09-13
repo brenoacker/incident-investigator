@@ -55,7 +55,7 @@ class LocalEmbeddingAdapter:
     def embed(self, texts: list[str]) -> list[list[float]]:
         if self._encoder is None:
             try:
-                from sentence_transformers import SentenceTransformer  # type: ignore[import-not-found]  # noqa: I001
+                from sentence_transformers import SentenceTransformer
             except ImportError as error:
                 raise RuntimeError(
                     "sentence-transformers is required for local semantic retrieval"
