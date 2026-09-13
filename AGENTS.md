@@ -23,6 +23,8 @@ The repository's skills are stored in `.agents/skills/`. Before choosing a workf
 
 Prefer repository skills over similarly named global skills when both exist. Use the skill's name and description to decide whether it applies; do not assume the static list below is exhaustive.
 
+Skill discovery is complete only after listing the immediate `.agents/skills/` directories; then read each named or applicable repository `SKILL.md` before acting.
+
 ## Living workflow documentation
 
 Before finalizing any change or addition that affects system behavior, compare it with `docs/system-workflow.md` and update that file if the map, a table, or a Mermaid diagram no longer represents the implemented behavior. Clearly mark what is implemented and what remains planned.
@@ -46,14 +48,22 @@ Every implemented feature must have tests that exercise its observable behavior 
 4. If any verification fails, diagnose the cause, fix the code or test, and rerun all affected verifications.
 5. Declare the implementation ready only when the executed verifications pass; skipped or unexecuted tests do not count as approval.
 
+A missing dependency or service, collection failure, or required skip leaves verification incomplete: resolve it or report the work as not ready.
+
 ## Code review cycle
 
 After implementing and verifying the code, run the Matt Pocock `code-review` skill against the ticket, diff and repository standards.
 
+Manual diff inspection is not this review; execute both the Standards and Spec axes defined by the repository `code-review` skill.
+
 1. Record every review finding, including specification gaps, risks and missing tests.
 2. Implement every actionable finding before handoff or PR.
+
+Do not commit, hand off or open a PR while an actionable finding remains; unresolved findings mean the work is not ready.
 3. Rerun tests and static checks after each correction.
 4. Repeat `code-review` on the new diff until there are no actionable findings.
+
+Any implementation, test or documentation correction after a review invalidates it; rerun `code-review` on the final diff.
 5. Declare the work ready only when tests, checks and review have no pending gaps.
 
 `code-review` complements tests: tests demonstrate executed behavior; review checks coverage against the specification, standards and risks that tests may miss.
