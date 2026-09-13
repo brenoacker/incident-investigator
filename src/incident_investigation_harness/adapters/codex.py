@@ -14,7 +14,7 @@ from incident_investigation_harness.isolation import InvestigationEnvironment
 from incident_investigation_harness.report import InvestigationReport
 from incident_investigation_harness.runner import (
     EvaluatedRunRequest, InvestigationEvent, InvestigatorExecution,
-    InvestigatorExecutionFailure)
+    InvestigatorExecutionFailure, InvestigatorUsage)
 from incident_investigation_harness.scenarios import ScenarioName
 
 CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
@@ -74,7 +74,12 @@ class CodexInvestigatorAdapter:
                     text=True,
                     capture_output=True,
                     check=False,
-                    timeout=self._timeout_seconds,
+                    timeout=min(
+                        self._timeout_seconds,
+                        request.limits.max_duration_seconds
+                        if request.limits.max_duration_seconds is not None
+                        else self._timeout_seconds,
+                    ),
                     input=prompt,
                 )
             except ConnectionError as error:
@@ -82,7 +87,14 @@ class CodexInvestigatorAdapter:
                 raise InvestigatorExecutionFailure(
                     str(error), tuple(events), category="provider-unavailable"
                 ) from error
-            except (OSError, subprocess.TimeoutExpired) as error:
+            except subprocess.TimeoutExpired as error:
+                events.append(self._event(request, "investigation.failed", {"error": str(error)}))
+                raise InvestigatorExecutionFailure(
+                    str(error), tuple(events),
+                    category=("resource-limit" if request.limits.max_duration_seconds is not None else "cli-interrupted"),
+                    limit=("time" if request.limits.max_duration_seconds is not None else None),
+                ) from error
+            except OSError as error:
                 events.append(self._event(request, "investigation.failed", {"error": str(error)}))
                 raise InvestigatorExecutionFailure(
                     str(error), tuple(events), category="cli-interrupted"
@@ -95,6 +107,21 @@ class CodexInvestigatorAdapter:
                 raise InvestigatorExecutionFailure(
                     str(error), tuple(events), category="invalid-output"
                 ) from error
+            observed_calls = sum(event.event_type == "investigation.query" for event in events)
+            observed_usage = _usage_from_stdout(completed.stdout, observed_calls, request)
+            for limit_name, limit, observed in (
+                ("mcp-calls", request.limits.max_mcp_calls, observed_calls),
+                ("steps", request.limits.max_steps, observed_calls),
+            ):
+                if limit is not None and observed > limit:
+                    events.append(self._event(request, "investigation.failed", {
+                        "limit": limit_name, "observed": observed,
+                    }))
+                    raise InvestigatorExecutionFailure(
+                        f"resource limit exhausted: {limit_name}", tuple(events),
+                        category="resource-limit", limit=limit_name,
+                        usage=observed_usage,
+                    )
             if completed.returncode != 0:
                 events.append(
                     self._event(
@@ -127,7 +154,10 @@ class CodexInvestigatorAdapter:
 
         events.append(self._event(request, "investigation.output", {"schema_version": report.schema_version}))
         events.append(self._event(request, "investigation.completed", {"schema_version": report.schema_version}))
-        return InvestigatorExecution(report=report, events=tuple(events))
+        usage = _usage_from_stdout(completed.stdout, sum(
+            event.event_type == "investigation.query" for event in events
+        ), request)
+        return InvestigatorExecution(report=report, events=tuple(events), usage=usage)
 
     def _command(
         self,
@@ -137,7 +167,7 @@ class CodexInvestigatorAdapter:
         output_path: Path,
         prompt: str,
     ) -> list[str]:
-        del request, prompt
+        del prompt
         command = [
             self._executable,
             "exec",
@@ -153,6 +183,8 @@ class CodexInvestigatorAdapter:
             "--ignore-user-config",
             "--ignore-rules",
         ]
+        if request.limits.max_steps is not None:
+            command.extend(["--max-turns", str(request.limits.max_steps)])
         for name, url in servers.items():
             command.extend(["--config", f'mcp_servers.{name}.url={json.dumps(url)}'])
             # Headless Codex cannot ask a human to approve MCP calls. This
@@ -298,6 +330,56 @@ def _query_provider(payload: Mapping[str, Any]) -> str | None:
             if provider.removesuffix("-mcp") in name or provider in name:
                 return provider
     return None
+
+
+def _usage_from_stdout(
+    stdout: str, mcp_calls: int, request: EvaluatedRunRequest
+) -> InvestigatorUsage:
+    """Extract provider-neutral usage fields from Codex JSONL events."""
+    values: dict[str, float] = {}
+
+    def visit(value: object) -> None:
+        if isinstance(value, dict):
+            for key in ("input_tokens", "output_tokens", "estimated_cost", "cost"):
+                candidate = value.get(key)
+                if isinstance(candidate, (int, float)) and not isinstance(candidate, bool):
+                    values[key] = float(candidate)
+            for child in value.values():
+                visit(child)
+        elif isinstance(value, list):
+            for child in value:
+                visit(child)
+
+    for line in stdout.splitlines():
+        try:
+            visit(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    step_events = sum(
+        isinstance(item, dict)
+        and isinstance(item.get("type"), str)
+        and "turn" in item["type"]
+        and ("started" in item["type"] or "completed" in item["type"])
+        for line in stdout.splitlines()
+        for item in [_json_object(line)]
+    )
+    return InvestigatorUsage(
+        input_tokens=int(values["input_tokens"]) if "input_tokens" in values else None,
+        output_tokens=int(values["output_tokens"]) if "output_tokens" in values else None,
+        estimated_cost=values.get("estimated_cost", values.get("cost")),
+        steps=step_events or mcp_calls,
+        mcp_calls=mcp_calls,
+        incident_id=request.incident_id,
+        investigation_run_id=request.investigation_run_id,
+    )
+
+
+def _json_object(line: str) -> object:
+    try:
+        value = json.loads(line)
+    except json.JSONDecodeError:
+        return None
+    return value
 
 
 def _child_environment() -> dict[str, str]:

@@ -4,6 +4,9 @@ import json
 from pathlib import Path
 import subprocess
 import uuid
+from time import sleep
+
+import pytest
 
 from incident_investigation_harness.adapters.codex import CodexInvestigatorAdapter
 from incident_investigation_harness.evidence import EvidenceCitation
@@ -25,6 +28,8 @@ from incident_investigation_harness.runner import (
     EvaluatedRunRunner,
     InvestigationEvent,
     InvestigatorExecution,
+    InvestigatorUsage,
+    RunLimits,
     RunArtifactStore,
 )
 from incident_investigation_harness.scenarios import ScenarioName
@@ -355,6 +360,94 @@ def test_runner_rejects_events_from_another_run_without_evaluating_report() -> N
 
     assert result.execution_failure is not None
     assert result.quality_gate is None
+
+
+@pytest.mark.parametrize(
+    ("limits", "usage", "event_type", "expected"),
+    [
+        (RunLimits(max_steps=1), InvestigatorUsage(steps=2), "investigation.completed", "steps"),
+        (RunLimits(max_mcp_calls=1), InvestigatorUsage(mcp_calls=2), "investigation.completed", "mcp-calls"),
+        (RunLimits(max_tokens=10), InvestigatorUsage(input_tokens=6, output_tokens=5), "investigation.completed", "tokens"),
+        (RunLimits(max_cost=0.01), InvestigatorUsage(estimated_cost=0.02), "investigation.completed", "cost"),
+    ],
+)
+def test_runner_turns_each_exhausted_usage_budget_into_a_failure(
+    limits: RunLimits, usage: InvestigatorUsage, event_type: str, expected: str
+) -> None:
+    request = _request()
+
+    class OverBudgetInvestigator:
+        def investigate(self, received: EvaluatedRunRequest, environment: object) -> InvestigatorExecution:
+            del environment
+            return InvestigatorExecution(
+                report=_report(received),
+                usage=usage,
+                events=(InvestigationEvent(
+                    event_type=event_type,
+                    incident_id=received.incident_id,
+                    investigation_run_id=received.investigation_run_id,
+                ),),
+            )
+
+    result = EvaluatedRunRunner(OverBudgetInvestigator()).run(
+        request.model_copy(update={"limits": limits})
+    )
+
+    assert result.verdict == "execution-failure"
+    assert result.execution_failure is not None
+    assert result.execution_failure.category == "resource-limit"
+    assert result.execution_failure.limit == expected
+    assert result.execution_failure.usage is not None
+    observed = result.execution_failure.usage
+    assert observed.model_copy(update={
+        "elapsed_seconds": 0,
+        "incident_id": None,
+        "investigation_run_id": None,
+    }) == usage
+    assert observed.incident_id == request.incident_id
+    assert observed.investigation_run_id == request.investigation_run_id
+    assert result.quality_gate is None
+    assert result.events
+    assert any(artifact.artifact_type == "events" for artifact in result.artifacts)
+
+
+def test_runner_allows_normal_completion_and_reports_observed_mcp_calls() -> None:
+    request = _request()
+    event = InvestigationEvent(
+        event_type="investigation.query",
+        incident_id=request.incident_id,
+        investigation_run_id=request.investigation_run_id,
+    )
+
+    class Investigator:
+        def investigate(self, received: EvaluatedRunRequest, environment: object) -> InvestigatorExecution:
+            del environment
+            return InvestigatorExecution(report=_report(received), events=(event,))
+
+    result = EvaluatedRunRunner(Investigator()).run(
+        request.model_copy(update={"limits": RunLimits(max_mcp_calls=1)})
+    )
+
+    assert result.execution_failure is None
+    assert result.usage is not None
+    assert result.usage.mcp_calls == 1
+
+
+def test_runner_ends_a_run_that_exceeds_the_elapsed_time_budget() -> None:
+    request = _request().model_copy(update={"limits": RunLimits(max_duration_seconds=0.001)})
+
+    class SlowInvestigator:
+        def investigate(self, received: EvaluatedRunRequest, environment: object) -> InvestigatorExecution:
+            del environment
+            sleep(0.01)
+            return InvestigatorExecution(report=_report(received))
+
+    result = EvaluatedRunRunner(SlowInvestigator()).run(request)
+
+    assert result.execution_failure is not None
+    assert result.execution_failure.category == "resource-limit"
+    assert result.execution_failure.limit == "time"
+    assert not result.approved
 
 
 def _request(
