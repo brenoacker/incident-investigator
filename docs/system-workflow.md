@@ -61,6 +61,7 @@ model tokens.
 | Scenarios and fixtures | Control traffic, failures and evidence for reproducibility, including deliberately ambiguous evidence | Setup / evaluation |
 | Codex CLI | Runs the investigation in an isolated workspace | Incident Triage |
 | Evidence Providers | Expose bounded evidence to Codex through MCP | Incident Triage |
+| Investigation coordinator | Plans, gathers bounded evidence, follows evidence gaps and synthesizes one report | Incident Triage |
 | Evaluated Run runner | Composes one identified investigation, collects its artifacts and invokes external evaluation | Incident Triage / Evaluation |
 | Quality Gate | Validates the report without relying on subjective model judgment | Evaluation |
 | Incident Oracle | Stores the private reference and scenario criteria | Evaluation, outside Codex's reach |
@@ -135,7 +136,7 @@ The implemented `prompt-injection` fixture includes a ticket/comment instruction
 
 ## 6. Preparing an Investigation Run
 
-An Investigation Run is an identifiable attempt to investigate an incident. The public `EvaluatedRunRunner.run` boundary accepts an `EvaluatedRunRequest` (scenario and both identifiers), starts a fresh `RunArtifactStore` bucket for that identity, invokes the configured `InvestigatorAdapter`, collects its `InvestigationReport`, scoped JSONL events and citation metadata, and then evaluates them with the external Quality Gate. Provider unavailability, CLI interruption, invalid output and missing reports have explicit `ExecutionFailure` categories. A failure preserves only safe, run-scoped artifacts and is never evaluated as an approval.
+An Investigation Run is an identifiable attempt to investigate an incident. The public `InvestigationCoordinator` boundary plans an initial question, gathers bounded evidence, follows evidence gaps with authorized providers, and synthesizes the final report. It emits planning, evidence-gathering, synthesis and completion stages and stops on sufficient evidence, Calibrated Uncertainty, provider failure or its query limit. Every query is rewritten with the original `incident_id` and `investigation_run_id` before dispatch. The public `EvaluatedRunRunner.run` boundary accepts an `EvaluatedRunRequest` (scenario and both identifiers), starts a fresh `RunArtifactStore` bucket for that identity, invokes the configured `InvestigatorAdapter`, collects its `InvestigationReport`, scoped JSONL events and citation metadata, and then evaluates them with the external Quality Gate. Provider unavailability, CLI interruption, invalid output and missing reports have explicit `ExecutionFailure` categories. A failure preserves only safe, run-scoped artifacts and is never evaluated as an approval.
 
 ```mermaid
 flowchart TD
@@ -146,7 +147,8 @@ flowchart TD
     Workspace --> Sandbox[Verify effective InvestigationSandbox]
     Sandbox --> Tools[Authorize allowlisted read-only MCPs only]
     Tools --> Start[Start investigation]
-    Start --> Runner[Evaluated Run runner]
+    Start --> Coordinator[Investigation coordinator]
+    Coordinator --> Runner[Evaluated Run runner]
     Runner --> Collect[Collect report and JSONL events]
     Collect --> ExternalGate[Evaluate outside investigator]
 ```
@@ -180,7 +182,8 @@ flowchart TD
     O --> Correlate
     K --> Correlate
     S --> Correlate
-    Correlate --> Report[Investigation Report]
+    Correlate --> Coordinator[Multi-step coordinator]
+    Coordinator --> Report[Investigation Report]
 ```
 
 ### How an MCP query works
