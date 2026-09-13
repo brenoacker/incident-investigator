@@ -227,8 +227,19 @@ def record_model_execution(
         labels["failure_category"] = failure_category
     telemetry.model_executions.add(1, labels)
     telemetry.model_duration.record(duration_seconds, labels)
-    usage_available = input_tokens is not None or output_tokens is not None or estimated_cost is not None
-    telemetry.model_usage.add(1, {**labels, "availability": "available" if usage_available else "unavailable"})
+    for field, value in (
+        ("input_tokens", input_tokens),
+        ("output_tokens", output_tokens),
+        ("estimated_cost", estimated_cost),
+    ):
+        telemetry.model_usage.add(
+            1,
+            {
+                **labels,
+                "field": field,
+                "availability": "available" if value is not None else "unavailable",
+            },
+        )
     if input_tokens is not None:
         telemetry.model_input_tokens.add(input_tokens, labels)
     if output_tokens is not None:
@@ -240,12 +251,12 @@ def record_model_execution(
 
 
 def record_report_collection(
-    *, context: object, scenario: str, size_bytes: int, claim_count: int
+    *, context: object, scenario: str, size_bytes: int
 ) -> None:
     """Record report shape and size; never record report text or citations."""
     labels = {"scenario": scenario}
     telemetry.reports_collected.add(1, labels)
-    telemetry.report_size.record(size_bytes, {**labels, "claims": str(claim_count)})
+    telemetry.report_size.record(size_bytes, labels)
 
 
 def instrument_evidence_query(provider: str, operation: str) -> Callable[[Callable[P, R]], Callable[P, R]]:
