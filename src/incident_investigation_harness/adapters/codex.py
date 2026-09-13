@@ -81,7 +81,7 @@ class CodexInvestigatorAdapter:
                 partial = error.output if isinstance(error.output, str) else ""
                 usage = _usage_from_stdout(partial, sum(
                     event.event_type == "investigation.query" for event in events
-                ), request).model_copy(update={"elapsed_seconds": self._timeout_seconds})
+                ), request).model_copy(update={"elapsed_seconds": self._effective_timeout(request)})
                 raise InvestigatorExecutionFailure(
                     str(error), tuple(events),
                     category=("resource-limit" if request.limits.max_duration_seconds is not None else "cli-interrupted"),
@@ -99,13 +99,14 @@ class CodexInvestigatorAdapter:
                     str(error), tuple(events), category="invalid-output"
                 ) from error
 
-            try:
-                events.extend(self._stream_events(request, environment, completed.stdout))
-            except ValueError as error:
-                events.append(self._event(request, "investigation.failed", {"error": str(error)}))
-                raise InvestigatorExecutionFailure(
-                    str(error), tuple(events), category="invalid-output"
-                ) from error
+            if self._command_runner is not subprocess.run:
+                try:
+                    events.extend(self._stream_events(request, environment, completed.stdout))
+                except ValueError as error:
+                    events.append(self._event(request, "investigation.failed", {"error": str(error)}))
+                    raise InvestigatorExecutionFailure(
+                        str(error), tuple(events), category="invalid-output"
+                    ) from error
             observed_calls = sum(event.event_type == "investigation.query" for event in events)
             observed_usage = _usage_from_stdout(completed.stdout, observed_calls, request)
             exceeded = _first_exceeded_limit(request, observed_usage, fail_unknown=True)
@@ -163,12 +164,7 @@ class CodexInvestigatorAdapter:
         environment: InvestigationEnvironment,
         events: list[InvestigationEvent],
     ) -> subprocess.CompletedProcess[str]:
-        timeout = min(
-            self._timeout_seconds,
-            request.limits.max_duration_seconds
-            if request.limits.max_duration_seconds is not None
-            else self._timeout_seconds,
-        )
+        timeout = self._effective_timeout(request)
         if self._command_runner is not subprocess.run:
             return self._command_runner(
                 command, cwd=str(root), env=_child_environment(), text=True,
@@ -233,6 +229,14 @@ class CodexInvestigatorAdapter:
             if process.poll() is None:
                 process.kill()
                 process.wait()
+
+    def _effective_timeout(self, request: EvaluatedRunRequest) -> float:
+        return min(
+            self._timeout_seconds,
+            request.limits.max_duration_seconds
+            if request.limits.max_duration_seconds is not None
+            else self._timeout_seconds,
+        )
 
     def _command(
         self,
