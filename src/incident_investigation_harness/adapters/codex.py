@@ -422,7 +422,9 @@ def _usage_from_stdout(
             for key in ("input_tokens", "output_tokens", "estimated_cost", "cost"):
                 candidate = value.get(key)
                 if isinstance(candidate, (int, float)) and not isinstance(candidate, bool):
-                    values[key] = float(candidate)
+                    # Usage events may be incremental; accumulate them so a
+                    # later event cannot hide earlier resource consumption.
+                    values[key] = values.get(key, 0.0) + float(candidate)
             for child in value.values():
                 visit(child)
         elif isinstance(value, list):
